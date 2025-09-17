@@ -1658,8 +1658,27 @@ const save = async () => {
 };
 
 /* ============================ Media ============================ */
-const apiBase = (import.meta.env.VITE_API_BASE || 'http://localhost:4000/api');
-const imageUrl = (p) => apiBase.replace('/api','') + p;
+const apiBase = (import.meta.env.IMAGE_BASE || '');
+const IMAGE_BASE = import.meta.env.VITE_IMAGE_BASE || '/api'; // leave empty for same-origin
+
+function imageUrl(p) {
+  if (!p) return '';
+  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  let path = String(p);
+
+  // normalize to /uploads/...
+  if (!path.startsWith('/')) {
+    path = '/' + path;
+  }
+  if (!path.startsWith('/uploads/')) {
+    path = '/uploads/' + path.replace(/^\/+/, '');
+  }
+
+  // encode just the filename, not the whole path
+  const parts = path.split('/');
+  const file = parts.pop();
+  return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
+}
 const isImage = (path) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(path || '');
 
 const uploadPhotos = async (e) => {

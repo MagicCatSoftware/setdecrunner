@@ -11,7 +11,7 @@ import Dashboard from './views/Dashboard.vue';
 
 // Lazy views
 const RunSheets        = () => import('./views/RunSheets.vue');
-const RunSheetSingle   = () => import('./views/RunSheetSingle.vue');
+const RunSheetSingle   = () => import('./views/RunsheetSingle.vue');
 const RunSheetEditor   = () => import('./views/RunSheetEditor.vue');
 const RunSheetsBeta    = () => import('./views/RunSheetsBeta.vue');
 
@@ -39,7 +39,7 @@ const Public = () => import('./views/Public.vue');
 const Pricing = () => import('./views/Pricing.vue');
 const Features = () => import('./views/Features.vue');
 const FAQ = () => import('./views/FAQ.vue');
-const Purchase = import('./views/Purchase.vue')
+const Purchase = () => import('./views/Purchase.vue');
 
 function getToken() {
   const t = localStorage.getItem('token');
@@ -88,6 +88,7 @@ const router = createRouter({
     {path:'/purchase',name:"purchase",component:Purchase},
     {path:'/features',name:"features",component:Features},
     {path:'/FAQ',name:"FAQ",component:FAQ},
+    // Bypass SPA routing for static files & API — let Nginx handle them
 
     // 🔓 Global logout (works anywhere)
     {

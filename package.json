@@ -1,0 +1,19 @@
+{
+  "name": "setdecrunnerofficial",
+  "version": "1.0.0",
+  "description": "An application for Set Decoration film industry.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adompatchett/setdecrunnerofficial.git"
+  },
+  "author": "Adom",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/adompatchett/setdecrunnerofficial/issues"
+  },
+  "homepage": "https://github.com/adompatchett/setdecrunnerofficial#readme"
+}

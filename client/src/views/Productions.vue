@@ -1,5 +1,6 @@
 <!-- client/src/views/Productions.vue -->
 <template>
+  <NavBar :me="me" @logout="logout" />
   <div class="container">
     <!-- Header -->
     <div class="panel header">
@@ -93,7 +94,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import api from '../api.js';          // default client (api.get/post/etc.)
-
+import NavBar from '../components/NavBar.vue';
 /* -------------------------------- state -------------------------------- */
 const router = useRouter();
 const route  = useRoute();

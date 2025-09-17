@@ -180,21 +180,27 @@ const logout = () => {
   router.replace({ name: 'tenant-logout', params: { slug: slug.value } });
 };
 
-const imageUrl = (p) => {
+const apiBase = (import.meta.env.IMAGE_BASE || '');
+const IMAGE_BASE = import.meta.env.VITE_IMAGE_BASE || '/api'; // leave empty for same-origin
+
+function imageUrl(p) {
   if (!p) return '';
-  let src = String(p);
-  if (/^(?:https?:)?\/\//i.test(src) || src.startsWith('data:')) {
-    if (src.startsWith('//')) return `https:${src}`;
-    if (location.protocol === 'https:' && src.startsWith('http:')) src = src.replace(/^http:/i, 'https:');
-    return src;
+  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  let path = String(p);
+
+  // normalize to /uploads/...
+  if (!path.startsWith('/')) {
+    path = '/' + path;
   }
-  src = src.replace(/\\/g, '/');
-  const idx = src.indexOf('/uploads/');
-  if (idx !== -1) src = src.slice(idx);
-  if (!src.startsWith('/')) src = `/${src}`;
-  if (!src.startsWith('/uploads/')) src = src.replace(/^\/+/, '/uploads/');
-  return `${API_ORIGIN}${src}`;
-};
+  if (!path.startsWith('/uploads/')) {
+    path = '/uploads/' + path.replace(/^\/+/, '');
+  }
+
+  // encode just the filename, not the whole path
+  const parts = path.split('/');
+  const file = parts.pop();
+  return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
+}
 
 const stamp = () => { lastUpdated.value = new Date().toLocaleTimeString(); };
 

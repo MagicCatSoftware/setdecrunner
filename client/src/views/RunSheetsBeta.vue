@@ -567,18 +567,28 @@
   })();
   const DEV = !!(import.meta?.env && import.meta.env.DEV);
   
-  function imageUrl(p){
-    let s = String(p || '');
-    if (!s) return '';
-    if (/^(data:|blob:|https?:)/i.test(s)) return s;
-    if (s.startsWith('uploads/')) s = '/' + s;     // normalize "uploads/…" → "/uploads/…"
-    if (s.startsWith('/uploads/')) {
-      if (API_BASE) return API_BASE + s;           // absolute backend origin known
-      if (DEV) return '/api' + s;                  // rely on Vite proxy (rewrite /api -> backend)
-      return s;                                    // same-origin prod
-    }
-    return s;
+const IMAGE_BASE = import.meta.env.IMAGE_BASE || '/api'; // leave empty for same-origin
+
+function imageUrl(p) {
+  if (!p) return '';
+  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  let path = String(p);
+
+  // normalize to /uploads/...
+  if (!path.startsWith('/')) {
+    path = '/' + path;
   }
+  if (!path.startsWith('/uploads/')) {
+    path = '/uploads/' + path.replace(/^\/+/, '/api/');
+  }
+
+  console.log(path);
+
+  // encode just the filename, not the whole path
+  const parts = path.split('/');
+  const file = parts.pop();
+  return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
+}
   
   function print(){ window.print(); }
   async function share(){ try { await navigator.share?.({ title: rs.value?.title || 'Runsheet', url: location.href }); } catch {} }

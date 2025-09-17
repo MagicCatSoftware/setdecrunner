@@ -284,24 +284,31 @@ const quickItemName = ref('');
 const quickItemQty = ref(1);
 const addingItem = ref(false);
 
-const API_BASE = (import.meta.env.VITE_API_BASE || 'http://localhost:4000/api').replace(/\/+$/, '');
-const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '') || window.location.origin;
+const IMAGE_BASE = import.meta.env.IMAGE_BASE || '/api'; // leave empty for same-origin
+const VITE_API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
-const imageUrl = (p) => {
+
+function imageUrl(p) {
   if (!p) return '';
-  let s = String(p);
-  if (/^(?:https?:)?\/\//i.test(s) || s.startsWith('data:')) {
-    if (s.startsWith('//')) return `https:${s}`;
-    if (location.protocol === 'https:' && s.startsWith('http:')) s = s.replace(/^http:/i, 'https:');
-    return s;
+  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  let path = String(p);
+
+  // normalize to /uploads/...
+  if (!path.startsWith('/')) {
+    path = '/' + path;
   }
-  s = s.replace(/\\/g, '/');
-  const idx = s.indexOf('/uploads/');
-  if (idx !== -1) s = s.slice(idx);
-  if (!s.startsWith('/')) s = `/${s}`;
-  if (!s.startsWith('/uploads/')) s = s.replace(/^\/+/, '/uploads/');
-  return `${API_ORIGIN}${s}`;
-};
+  if (!path.startsWith('/uploads/')) {
+    path = '/uploads/' + path.replace(/^\/+/, '/api/');
+  }
+
+  console.log(path);
+
+  // encode just the filename, not the whole path
+  const parts = path.split('/');
+  const file = parts.pop();
+  return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
+}
+  
 
 const logout = () => {
   router.replace({ name: 'tenant-logout', params: { slug: slug.value } });
@@ -530,7 +537,7 @@ const save = async () => {
     const token  = localStorage.getItem('token') || '';
     const prodId = localStorage.getItem('currentProductionId') || '';
 
-    const res = await fetch(`${API_BASE}/tenant/places${creatingNew.value ? '' : '/' + editing.value._id}`, {
+    const res = await fetch(`/tenant/places${creatingNew.value ? '' : '/' + editing.value._id}`, {
       method: creatingNew.value ? 'POST' : 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -574,7 +581,7 @@ const uploadPhotos = async (e) => {
   try {
     const token  = localStorage.getItem('token') || '';
     const prodId = localStorage.getItem('currentProductionId') || '';
-    const res = await fetch(`${API_BASE}/tenant/places/${editing.value._id}/photos`, {
+    const res = await fetch(`/tenant/places/${editing.value._id}/photos`, {
       method: 'POST',
       headers: {
         ...(token  ? { Authorization: `Bearer ${token}` } : {}),
@@ -598,7 +605,7 @@ const removePhoto = async (url) => {
   try {
     const token  = localStorage.getItem('token') || '';
     const prodId = localStorage.getItem('currentProductionId') || '';
-    const res = await fetch(`${API_BASE}/tenant/places/${editing.value._id}/photos`, {
+    const res = await fetch(`/tenant/places/${editing.value._id}/photos`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

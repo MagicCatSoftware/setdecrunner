@@ -33,7 +33,7 @@
                 <div class="item__title">
                   <img
                     v-if="p.photo"
-                    :src="photoSrc(p.photo)"
+                    :src="imgaeUrl(p.photo)"
                     alt=""
                     class="thumb" width="96px" height="96px"
                   />
@@ -92,22 +92,25 @@ function qs(obj = {}) {
 }
 
 // Normalize image/url from API (absolute/data OR /uploads/*)
-const rawApiBase = (import.meta.env.VITE_API_BASE || 'http://localhost:4000/api').replace(/\/+$/, '');
-const apiOrigin  = rawApiBase.replace(/\/api\/?$/, '') || window.location.origin;
-function photoSrc(p) {
+const IMAGE_BASE = import.meta.env.IMAGE_BASE || '/api'; // leave empty for same-origin
+
+function imageUrl(p) {
   if (!p) return '';
-  let src = String(p);
-  if (/^(?:https?:)?\/\//i.test(src) || src.startsWith('data:')) {
-    if (src.startsWith('//')) return `https:${src}`;
-    if (location.protocol === 'https:' && src.startsWith('http:')) src = src.replace(/^http:/i, 'https:');
-    return src;
+  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  let path = String(p);
+
+  // normalize to /uploads/...
+  if (!path.startsWith('/')) {
+    path = '/' + path;
   }
-  src = src.replace(/\\/g, '/');
-  const idx = src.indexOf('/uploads/');
-  if (idx !== -1) src = src.slice(idx);
-  if (!src.startsWith('/')) src = `/${src}`;
-  if (!src.startsWith('/uploads/')) src = src.replace(/^\/+/, '/uploads/');
-  return `${apiOrigin}${src}`;
+  if (!path.startsWith('/uploads/')) {
+    path = '/uploads/' + path.replace(/^\/+/, '');
+  }
+
+  // encode just the filename, not the whole path
+  const parts = path.split('/');
+  const file = parts.pop();
+  return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
 }
 
 async function load() {

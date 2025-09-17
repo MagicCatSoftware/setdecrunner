@@ -141,5 +141,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 # app data
 uploads/
+public/
 client/dist/
 server/.env

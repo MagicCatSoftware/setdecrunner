@@ -17,7 +17,7 @@
         <div class="field">
           <div class="label">Photo</div>
           <div v-if="s.photo" class="person-photo-wrapper">
-  <img :src="photoUrl" alt="Person photo" class="person-photo" />
+  <img :src="imageUrl(s.photo)" alt="Person photo" class="person-photo" />
   <button class="btn" :disabled="isNew" @click="removePhoto">Remove Photo</button>
 </div>
           <div style="margin-top:8px;">
@@ -103,14 +103,29 @@
   const logout = () => auth.logout();
   const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
   
-  const apiBase = (import.meta.env.VITE_API_BASE || 'http://localhost:4000/api');
-  const apiOrigin = apiBase.replace(/\/api$/, '');
-  const photoUrl = computed(() => {
-    const p = s.value.photo;
-    if (!p) return '';
-    if (/^(https?:)?\/\//i.test(p) || p.startsWith('data:')) return p;
-    return `${apiOrigin}${p.startsWith('/') ? p : '/' + p}`;
-  });
+const IMAGE_BASE = import.meta.env.IMAGE_BASE || '/api'; // leave empty for same-origin
+
+function imageUrl(p) {
+  if (!p) return '';
+  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  let path = String(p);
+
+  // normalize to /uploads/...
+  if (!path.startsWith('/')) {
+    path = '/' + path;
+  }
+  if (!path.startsWith('/uploads/')) {
+    path = '/uploads/' + path.replace(/^\/+/, '/api/');
+  }
+
+  console.log(path);
+
+  // encode just the filename, not the whole path
+  const parts = path.split('/');
+  const file = parts.pop();
+  return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
+}
+  
   
   const load = async () => {
     if (isNew.value) return;

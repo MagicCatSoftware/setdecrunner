@@ -40,9 +40,10 @@ const stripe = new Stripe(STRIPE_SECRET_KEY); // optional: { apiVersion: '2024-0
 
 /* ------------------------------- CORS -------------------------------- */
 const ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const allowlist = ['https://set-dec.com', 'https://www.set-dec.com'];
 app.use(
   cors({
-    origin: [ORIGIN],
+    origin: (origin, cb) => (!origin || allowlist.includes(origin) ? cb(null, true) : cb(new Error('CORS'))),
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     // allow both header casings, some clients vary
     allowedHeaders: ['Content-Type', 'Authorization', 'x-production-id', 'X-Production-Id'],
@@ -60,6 +61,9 @@ app.use('/uploads', express.static(UPLOAD_ROOT, {
     res.set('Cache-Control', 'public, max-age=31536000, immutable');
   },
 }));
+
+app.set('trust proxy', process.env.TRUST_PROXY ? 1 : 0);
+
 app.use(cookieParser());
 app.use(passport.initialize());
 
@@ -138,7 +142,7 @@ async function attachMembership(prod, user) {
 }
 
 /* ------------- Stripe webhook (raw body, BEFORE express.json) ------------- */
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let evt;
   try {
@@ -210,16 +214,16 @@ await mongoose.connect(process.env.MONGODB_URI);
 
 /* -------------------------------- Public routes --------------------------- */
 // Public auth (login/register/me)
-app.use('/api/auth', authRouter);
+app.use('/auth', authRouter);
 
 // Also expose auth under tenant prefix if your client expects it
-app.use('/api/tenant/auth', authRouter);
+app.use('/tenant/auth', authRouter);
 
 // Health
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true }));
 
 // Public: resolve by slug
-app.get('/api/productions/by-slug/:slug', async (req, res) => {
+app.get('/productions/by-slug/:slug', async (req, res) => {
   const slug = normalizeSlug(req.params.slug || '');
   const prod = await Production.findOne({ slug, isActive: true }).select('_id title slug').lean();
   if (!prod) return res.status(404).json({ error: 'Production not found' });
@@ -227,7 +231,7 @@ app.get('/api/productions/by-slug/:slug', async (req, res) => {
 });
 
 // Stripe account probe (dev helper)
-app.get('/api/stripe/check', async (_req, res) => {
+app.get('/stripe/check', async (_req, res) => {
   try {
     const account = await stripe.accounts.retrieve();
     res.json({ ok: true, account: account.id });
@@ -237,12 +241,12 @@ app.get('/api/stripe/check', async (_req, res) => {
 });
 
 // Create Checkout Session
-app.post('/api/checkout/session', async (req, res) => {
+app.post('/checkout/session', async (req, res) => {
   console.log(req.body);
   try {
-    const { title, desiredSlug } = req.body || {};
+    const { title,production} = req.body || {};
     const cleanTitle = String(title || '').trim();
-    const slug = normalizeSlug(desiredSlug || cleanTitle);
+    const slug = normalizeSlug(production.slug || cleanTitle);
 
     if (!cleanTitle) return res.status(400).json({ error: 'Title required' });
     if (!slug) return res.status(400).json({ error: 'Slug required' });
@@ -293,7 +297,7 @@ app.post('/api/checkout/session', async (req, res) => {
  * We attach membership (if webhook didn’t run yet), then
  * return a JWT + production info so the UI can log the user into the correct production.
  */
-app.get('/api/checkout/sessions/:id', async (req, res) => {
+app.get('/checkout/sessions/:id', async (req, res) => {
   try {
     const session = await stripe.checkout.sessions.retrieve(req.params.id);
     const meta = session.metadata || {};
@@ -382,20 +386,20 @@ app.get('/api/checkout/sessions/:id', async (req, res) => {
 /* ----------------------------- Tenant routes ------------------------------ */
 // Apply auth + membership to each tenant resource router explicitly
 const tenantMw = [authRequired, requireMembership];
-app.use('/api/tenant/productions', tenantMw, productionRoutes)
-app.use('/api/tenant/users',      tenantMw, userRoutes);
-app.use('/api/tenant/runsheets',  tenantMw, runsheetRoutes);
-app.use('/api/tenant/items',      tenantMw, itemRoutes);
-app.use('/api/tenant/places',     tenantMw, placeRoutes);
-app.use('/api/tenant/suppliers',  tenantMw, supplierRoutes);
-app.use('/api/tenant/people',     tenantMw, peopleRoutes);
-app.use('/api/tenant/admin',      tenantMw, adminUsersRouter);
-app.use('/api/tenant/sets',       tenantMw, setRoutes);
+app.use('/tenant/productions', tenantMw, productionRoutes)
+app.use('/tenant/users',      tenantMw, userRoutes);
+app.use('/tenant/runsheets',  tenantMw, runsheetRoutes);
+app.use('/tenant/items',      tenantMw, itemRoutes);
+app.use('/tenant/places',     tenantMw, placeRoutes);
+app.use('/tenant/suppliers',  tenantMw, supplierRoutes);
+app.use('/tenant/people',     tenantMw, peopleRoutes);
+app.use('/tenant/admin',      tenantMw, adminUsersRouter);
+app.use('/tenant/sets',       tenantMw, setRoutes);
 
 // If you still have miscellaneous tenant endpoints collected in tenantRouter
-app.use('/api/tenant', tenantMw, tenantRouter);
+app.use('/tenant', tenantMw, tenantRouter);
 
 /* --------------------------------- Boot --------------------------------- */
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 4001;
 app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`));
 

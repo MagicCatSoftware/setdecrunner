@@ -67,6 +67,7 @@ async function apiFetch(method, path, { params, body, headers } = {}) {
 }
 
 function apiGet(path, params, options = {}) {
+  
   return apiFetch('GET', path, { params, ...(options || {}) });
 }
 function apiPost(path, body, options = {}) {
