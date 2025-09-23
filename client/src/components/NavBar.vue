@@ -77,7 +77,7 @@
         draggable="false"
       />
       <span class="nav__name" :title="displayName">{{ displayName }}</span>
-      <button class="btn" @click="logout">Logout</button>
+      <button class="btn" @click="logoutsession">Logout</button>
     </div>
   </nav>
 </template>
@@ -85,7 +85,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { performLogout } from '../auth.js';
+import { logout } from '../auth.js';
 import { apiGet } from '../api.js';
 
 const router = useRouter();
@@ -235,9 +235,9 @@ function normalizePhoto(p) {
 const photoSrc = computed(() => normalizePhoto(rawPhoto.value));
 
 /* ---------------- actions ---------------- */
-function logout() {
+function logoutsession() {
   const s = String(route.params.slug || '');
-  performLogout(router, s);
+  logout(router, s);
 }
 
 /* ---------------- lifecycle ---------------- */

@@ -1,7 +1,6 @@
-// server/routes/auth.js
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto'
+import crypto from 'crypto';
 
 import User from '../models/User.js';
 import Production, { normalizeSlug } from '../models/Production.js';
@@ -27,19 +26,16 @@ function sendError(res, code, msg) {
 function toId(v) {
   if (!v) return '';
   if (typeof v === 'string' || typeof v === 'number') return String(v).trim();
-  // Prefer explicit fields
   const maybe =
     v._id ?? v.user ?? v.id ?? v.uid ?? v.userId ??
     (typeof v.valueOf === 'function' ? v.valueOf() : null);
   if (maybe) return String(maybe).trim();
-  // Last resort: toString that looks like an ObjectId
   try {
     const s = v.toString?.();
     if (s && /^[a-f0-9]{24}$/i.test(s)) return s;
-  } catch (_) {}
+  } catch {}
   return '';
 }
-
 function idsEqual(a, b) {
   const A = toId(a);
   const B = toId(b);
@@ -106,7 +102,7 @@ router.post('/complete-reset', async (req, res) => {
     return res.json({
       ok: true,
       token: jwt,
-      user: { _id: user._id, email: user.email, name: user.name, role: user.role},
+      user: { _id: user._id, email: user.email, name: user.name, role: user.role },
     });
   } catch (e) {
     console.error('[complete-reset] error', e);
@@ -133,7 +129,7 @@ router.post('/local/login', async (req, res) => {
       .select('_id slug')
       .lean();
     if (!prod) return sendError(res, 404, 'Production not found');
-    console.log(user);
+
     const isMember = (user.productionIds || []).map(String).includes(String(prod._id));
     if (!isMember) return sendError(res, 403, 'Not authorized for this production');
 
@@ -223,18 +219,38 @@ router.get(
   }
 );
 
-/* ------------------------------ /auth/me ------------------------------ */
+/* ------------------------------ LOGOUT ------------------------------ */
 /**
- * Returns the current user.
- * If x-production-id header is provided, also includes:
- *   - productionRole: 'admin' for owner, member role if set, or 'member'
- *   - productionAccess: { isOwner: boolean, isMember: boolean }
- *
- * Works whether Production.members is:
- *   - [ObjectId, ...]  OR
- *   - [{ user: ObjectId, role?: string }, ...]
- * Accepts owner in `ownerUserId` or `owner`.
+ * Stateless JWT logout.
+ * - If you use sessions, req.logout?.() is safe (no-op when session: false).
+ * - If you add a token denylist later, you can mark the incoming token here.
  */
+router.post('/logout', authRequired, async (req, res) => {
+  try {
+    // For Passport sessions (not used here): try to end session gracefully.
+    try { req.logout?.(); } catch {}
+
+    // Optionally hint the client to clear storage/cookies (cookies not used here).
+    res.setHeader('Clear-Site-Data', '"storage"');
+
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return sendError(res, 500, e.message || 'Logout failed');
+  }
+});
+
+// (Optional convenience: allow GET /auth/logout too)
+router.get('/logout', authRequired, async (req, res) => {
+  try {
+    try { req.logout?.(); } catch {}
+    res.setHeader('Clear-Site-Data', '"storage"');
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return sendError(res, 500, e.message || 'Logout failed');
+  }
+});
+
+/* ------------------------------ /auth/me ------------------------------ */
 router.get('/me', authRequired, async (req, res) => {
   try {
     const prodId = req.header('x-production-id');
@@ -295,5 +311,6 @@ router.get('/me', authRequired, async (req, res) => {
 });
 
 export default router;
+
 
 

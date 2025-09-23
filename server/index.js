@@ -451,6 +451,14 @@ app.get('/checkout/sessions/:id', async (req, res) => {
   }
 });
 
+// Good: no requireMembership here
+app.get('/tenant/productions/by_slug/:slug', async (req, res) => {
+  const prod = await Production.findOne({ slug: req.params.slug }).select('_id name slug').lean();
+  if (!prod) return res.status(404).json({ error: 'Production not found' });
+  res.json(prod);
+});
+
+
 /* ----------------------------- Tenant routes ------------------------------ */
 const tenantMw = [authRequired, requireMembership];
 app.use('/tenant/productions', tenantMw, productionRoutes);

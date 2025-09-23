@@ -1,6 +1,6 @@
 <template>
   <div>
-    <NavBar :me="me" @logout="logout" />
+    <NavBar :me="me" />
 
     <div class="rs container">
       <!-- Header -->
@@ -1089,7 +1089,7 @@ const error = ref('');
 const loading = ref(false);
 
 const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
-const logout = () => auth.logout();
+
 
 /* ===================== People (single-select contact) ===================== */
 const people = ref([]);

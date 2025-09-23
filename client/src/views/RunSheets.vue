@@ -1,6 +1,6 @@
 <template>
   <div>
-    <NavBar :me="me" @logout="logout" />
+    <NavBar :me="me" />
 
     <div class="container">
       <!-- Toolbar -->
@@ -257,7 +257,7 @@ async function ensureProductionId() {
 }
 
 /* -------------------- helpers -------------------- */
-const logout = () => router.replace({ name: 'tenant-logout', params: { slug: slug.value } });
+
 const isAdmin = computed(() => me.value?.role === 'admin' || me.value?.isAdmin === true);
 const stamp = () => { lastUpdated.value = new Date().toLocaleTimeString(); };
 

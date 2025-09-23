@@ -13,7 +13,6 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import NavBar from '../components/NavBar.vue';
-import { logout } from '../auth.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -91,28 +90,19 @@ async function ensureMe() {
 
 /* ================= actions ================= */
 
-function doLogout() {
-  logout();         // clears token/user and broadcasts auth:logout event
-  me.value = null;  // drop local copy immediately
 
-  // Send user to the :slug home; guards may redirect to login if required.
-  const slug = String(route.params.slug || '');
-  router.replace({ name: 'tenant-home', params: { slug } });
-}
 
 /* ================= lifecycle ================= */
 
-function onLoggedOut() {
-  me.value = null;
-}
+
 
 onMounted(() => {
   ensureMe();
-  window.addEventListener('auth:logout', onLoggedOut);
+  
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('auth:logout', onLoggedOut);
+ 
 });
 
 // If the navbar becomes eligible (e.g., storage updated), make sure "me" is loaded.

@@ -73,7 +73,6 @@ router.get(
   '/users',
   authRequired,
   requireMembership,
-  requireRole('admin'),
   async (req, res, next) => {
     try {
       const prodId = getProdIdOrThrow(req);

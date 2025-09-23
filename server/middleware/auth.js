@@ -14,7 +14,6 @@ export function issueJwt(user, { expiresIn = '12h' } = {}) {
     id: String(user._id),
     email: user.email,
     role: user.role || 'user',
-    siteAuthorized: !!user.siteAuthorized,
     isAdmin: user.role === 'admin' || user.isAdmin === true,
   };
   return jwt.sign(payload, SECRET, { expiresIn });
@@ -58,6 +57,8 @@ export async function authRequired(req, res, next) {
       
       productionIds: user.productionIds || [],
     };
+
+    console.log(req.user);
  
     next();
   } catch (e) {

@@ -1,7 +1,7 @@
 <template>
     <div class="page">
       <div class="no-print">
-        <NavBar :me="me" @logout="logout" />
+        <NavBar :me="me"/>
       </div>
   
       <div class="container">
@@ -263,8 +263,6 @@
   const auth  = useAuth();
   const me    = ref(null);
   const rs    = ref(null);
-  
-  const logout = () => auth.logout();
   
   /* ------------------------- Load RS ------------------------- */
   onMounted(async () => {

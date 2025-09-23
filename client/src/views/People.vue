@@ -1,6 +1,6 @@
 <template>
   <div>
-    <NavBar :me="me" @logout="logout" />
+    <NavBar :me="me" />
 
     <div class="container">
       <!-- People Card -->
@@ -81,10 +81,6 @@ const me = ref(null);
 const q = ref('');
 const people = ref([]);
 const error = ref('');
-
-const logout = () => {
-  router.replace({ name: 'tenant-logout', params: { slug: slug.value } });
-};
 
 function qs(obj = {}) {
   const s = new URLSearchParams(obj).toString();

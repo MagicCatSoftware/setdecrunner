@@ -1,6 +1,6 @@
 <template>
   <div>
-    <NavBar :me="me" @logout="logout" />
+    <NavBar :me="me" />
 
     <div class="container">
       <h2>Suppliers</h2>
@@ -64,9 +64,6 @@ const q = ref('');
 const suppliers = ref([]);
 const error = ref('');
 
-const logout = () => {
-  router.replace({ name: 'tenant-logout', params: { slug: slug.value } });
-};
 
 const GMAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 

@@ -69,25 +69,32 @@ function sanitizeExistingMembers(doc) {
   if (normalized !== undefined) doc.members = normalized;
 }
 
-/* --------------------------- PUBLIC --------------------------- */
-/** Used by SPA to validate a slug pre-auth. */
-router.get('/by-slug/:slug', async (req, res, next) => {
-  try {
-    const slug = String(req.params.slug || '').toLowerCase().trim();
-    const prod = await Production.findOne({ slug }).lean();
-    if (!prod) return res.status(404).json({ error: 'Not found' });
-    res.json(prod);
-  } catch (e) { next(e); }
-});
-
 /* --------------------------- AUTH ONLY (list) --------------------------- */
-router.use(authRequired);
+
 
 /**
  * GET /api/productions   (or /api/tenant/productions if mounted there)
  * Lists productions where the current user is owner or member.
  * ?q= search (title/slug/company), ?limit= (default 200, max 500)
  */
+
+
+/* --------------------------- MEMBERSHIP-SCOPED --------------------------- */
+
+/** GET /api/productions/:id  (id or slug) */
+router.get('/:id', async (req, res, next) => {
+  
+  try {
+
+    const prod = await getProductionQuery(req.params.id).lean();
+    
+    if (!prod) return res.status(404).json({ error: 'Not found' });
+    res.json(prod);
+  } catch (e) { console.log(e); next(e); }
+});
+router.use(authRequired);
+router.use(requireMembership);
+
 router.get('/', async (req, res, next) => {
   
   try {
@@ -122,20 +129,6 @@ router.get('/', async (req, res, next) => {
     
 
     res.json(prods);
-  } catch (e) { next(e); }
-});
-
-/* --------------------------- MEMBERSHIP-SCOPED --------------------------- */
-router.use(requireMembership);
-
-/** GET /api/productions/:id  (id or slug) */
-router.get('/:id', async (req, res, next) => {
-  try {
-    
-    const prod = await getProductionQuery(req.params.id).lean();
-    
-    if (!prod) return res.status(404).json({ error: 'Not found' });
-    res.json(prod);
   } catch (e) { next(e); }
 });
 

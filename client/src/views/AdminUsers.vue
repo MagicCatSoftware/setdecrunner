@@ -450,7 +450,7 @@ const createUser = async () => {
 
 /* ---------- lifecycle ---------- */
 onMounted(async () => {
-  me.value = await auth.fetchMe();
+  try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
   await ensureProduction(); // resolve production id
   allowed.value = await checkAdminAccess(); // backend is source of truth
   checked.value = true;

@@ -445,7 +445,7 @@ const setStatus = async (r, status) => {
 const recent = computed(() => list.value);
 
 onMounted(async () => {
-  me.value = await auth.fetchMe();
+  try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
   await load();
   await initMap();
   await refreshPlaces();

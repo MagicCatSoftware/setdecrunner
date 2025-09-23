@@ -1,6 +1,6 @@
 <template>
     <div>
-      <NavBar :me="me" @logout="logout" />
+      <NavBar :me="me" />
   
       <div class="container">
         <div class="row">
@@ -100,7 +100,7 @@
   const error = ref('');
   
   const isNew = computed(() => route.name === 'person-new');
-  const logout = () => auth.logout();
+ 
   const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
   
 const IMAGE_BASE = import.meta.env.IMAGE_BASE || '/api'; // leave empty for same-origin

@@ -112,6 +112,7 @@ const router = createRouter({
         const slug = String(to.params.slug || '').toLowerCase();
         try {
           const prod = await apiGet(`/productions/by-slug/${encodeURIComponent(slug)}`);
+          console.log(prod);
           localStorage.setItem('lastSlug', slug);
           localStorage.setItem('currentProductionId', prod._id);
           return true;

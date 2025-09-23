@@ -1,7 +1,5 @@
 <template>
-  
   <div class="container">
-    
     <div class="card">
       <h1 class="title">
         Access <span class="slug">/{{ route.params.slug }}</span>
@@ -80,10 +78,11 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiPost, apiGet } from '../api.js';
-
+import { useAuth } from '../auth.js';
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuth();
 
 const mode = ref('signin'); // 'signin' | 'signup'
 const name = ref('');
@@ -97,9 +96,23 @@ const slug = computed(() => String(route.params.slug || ''));
 const rDest = computed(() => (route.query?.r ? String(route.query.r) : `/${slug.value}`));
 
 // OAuth endpoints
-const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
+const apiBase = (import.meta.env.VITE_API_BASE || 'http://localhost:4000/api').replace(/\/+$/, '');
 const googleUrl = computed(() => `${apiBase}/auth/google?slug=${encodeURIComponent(slug.value)}&r=${encodeURIComponent(rDest.value)}`);
 const facebookUrl = computed(() => `${apiBase}/auth/facebook?slug=${encodeURIComponent(slug.value)}&r=${encodeURIComponent(rDest.value)}`);
+
+async function afterAuthNavigate() {
+  // Ensure we **have** membership info before navigating
+  try {
+    const me = await apiGet('/auth/me'); // carries x-production-id header now
+    // optional: cache to avoid flicker
+    try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
+  } catch (_) {
+    // If not authorized for this production, bounce back to login with notice
+    return router.replace({ name: 'tenant-login', params: { slug: slug.value }, query: { err: 'not-authorized' } });
+  }
+  const r = route.query?.r && String(route.query.r);
+  return router.replace(r || { name: 'tenant-home', params: { slug: slug.value } });
+}
 
 // Local sign-in
 async function signIn() {
@@ -111,10 +124,17 @@ async function signIn() {
       password: password.value,
       slug: slug.value,
     });
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    const r = route.query?.r && String(route.query.r);
-    router.replace(r || { name: 'tenant-home', params: { slug: slug.value } });
+
+    console.log(slug.value);
+
+    // Store token in both localStorage and api helper via auth
+    auth.setToken(token);
+    try { localStorage.setItem('user', JSON.stringify(user)); } catch {}
+
+    // 🔑 CRITICAL: resolve production id for this slug, set header, hydrate /auth/me
+    await auth.bootstrapForSlug(slug.value);
+
+    await afterAuthNavigate();
   } catch (e) {
     error.value = e?.body?.error || e?.message || 'Sign in failed';
   } finally {
@@ -132,13 +152,14 @@ async function signUp() {
       password: password.value,
       name: name.value || undefined,
     });
-    // Store token & user so they’re signed in immediately
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
 
-    // Try to go to dashboard — guards will bounce back with ?err=not-authorized if not a member
-    const r = route.query?.r && String(route.query.r);
-    router.replace(r || { name: 'tenant-home', params: { slug: slug.value } });
+    auth.setToken(token);
+    try { localStorage.setItem('user', JSON.stringify(user)); } catch {}
+
+    // You might not be a member yet; still bootstrap so /auth/me reflects reality.
+    await auth.bootstrapForSlug(slug.value);
+
+    await afterAuthNavigate();
   } catch (e) {
     error.value = e?.body?.error || e?.message || 'Registration failed';
   } finally {
@@ -146,20 +167,20 @@ async function signUp() {
   }
 }
 
-// Handle OAuth handoff (?token=) then continue to r or /:slug
+// Handle OAuth handoff (?token=) then continue ONLY after production bootstrap
 onMounted(async () => {
   const token = route.query?.token && String(route.query.token);
   if (token) {
-    localStorage.setItem('token', token);
+    auth.setToken(token);
     try {
-      const user = await apiGet('/auth/me');
-      localStorage.setItem('user', JSON.stringify(user));
+      // 🔑 resolve prod id for slug + hydrate /auth/me before navigating
+      await auth.bootstrapForSlug(slug.value);
     } catch {}
-    const r = route.query?.r && String(route.query.r);
-    router.replace(r || { name: 'tenant-home', params: { slug: slug.value } });
+    await afterAuthNavigate();
   }
 });
 </script>
+
 
 <style scoped>
 .container { max-width: 560px; margin: 48px auto; padding: 0 16px; }

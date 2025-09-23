@@ -3,7 +3,7 @@
   <div class="page">
     <!-- Hide NavBar on print -->
     <div class="no-print">
-      <NavBar :me="me" @logout="logout" />
+      <NavBar :me="me" />
     </div>
 
     <div class="sheet-wrap">
@@ -266,7 +266,6 @@ import { ref, onMounted, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import NavBar from '../components/NavBar.vue';
 import api from '../api.js';
-import { performLogout } from '../auth.js';
 import html2canvas from 'html2canvas';
 
 const route = useRoute();
@@ -277,10 +276,7 @@ const me = ref(null);
 const rs = ref(null);
 const sheetEl = ref(null);
 
-/* ---------------- helpers ---------------- */
-function logout() {
-  performLogout(router, slug.value);
-}
+
 const safeSplitLines = (s) =>
   (s || '')
     .split(/\n|,/)

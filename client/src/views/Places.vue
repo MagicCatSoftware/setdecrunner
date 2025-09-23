@@ -1,6 +1,6 @@
 <template>
   <div>
-    <NavBar :me="me" @logout="logout" />
+    <NavBar :me="me"/>
 
     <div class="container">
       <!-- Toolbar -->
@@ -301,18 +301,13 @@ function imageUrl(p) {
     path = '/uploads/' + path.replace(/^\/+/, '/api/');
   }
 
-  console.log(path);
+
 
   // encode just the filename, not the whole path
   const parts = path.split('/');
   const file = parts.pop();
   return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
 }
-  
-
-const logout = () => {
-  router.replace({ name: 'tenant-logout', params: { slug: slug.value } });
-};
 
 const mapsUrl = (lat, lng) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 

@@ -1,6 +1,6 @@
 <!-- client/src/views/Productions.vue -->
 <template>
-  <NavBar :me="me" @logout="logout" />
+  <NavBar :me="me" />
   <div class="container">
     <!-- Header -->
     <div class="panel header">
@@ -104,6 +104,7 @@ const loading = ref(false);
 const error   = ref('');
 const q       = ref('');
 const prods   = ref([]);
+const me = ref(null);
 
 /* ------------------------------ utilities ------------------------------ */
 const HEX24_RE = /^[a-f0-9]{24}$/i;
@@ -174,6 +175,8 @@ async function load() {
     const params = { limit: 100 };
     const qq = (q.value || '').trim();
     if (qq) params.q = qq;
+
+    try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
 
     // Expecting: GET /tenant/productions?q=...
     const list = await api.get('/tenant/productions', params);

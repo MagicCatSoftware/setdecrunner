@@ -1,6 +1,6 @@
 <template>
     <div>
-      <NavBar :me="me" @logout="logout" />
+      <NavBar :me="me"/>
   
       <div class="container">
         <div class="row">
@@ -53,7 +53,7 @@
   const savedAt = ref('');
   const error = ref('');
   
-  const logout = () => auth.logout();
+
   const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
   
   const load = async () => {

@@ -1,6 +1,6 @@
 <template>
   <div class="container">
-    <NavBar :me="me" @logout="logout" />
+    <NavBar :me="me" />
 
     <div class="panel header">
       <input v-model="prod.title" class="input input--title" placeholder="Production title" @input="onTitleInput" />
@@ -143,7 +143,7 @@ import NavBar from '../components/NavBar.vue';
 import api from '../api.js';
 
 // ---------- auth/nav helpers (match your existing style) ----------
-const logout = () => auth.logout?.();
+
 const me = ref(null);
 
 // ---------- routing ----------

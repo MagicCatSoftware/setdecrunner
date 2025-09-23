@@ -1,6 +1,6 @@
 <template>
     <div>
-      <NavBar :me="me" @logout="logout" />
+      <NavBar :me="me" />
   
       <div class="container">
         <div class="row">
@@ -80,7 +80,6 @@
   
   const isNew = computed(() => route.name === 'supplier-new');
   
-  const logout = () => auth.logout();
   const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
   
   const load = async () => {
