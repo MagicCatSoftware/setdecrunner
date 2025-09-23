@@ -8,6 +8,7 @@ import ThankYou from './views/ThankYou.vue';
 import SlugLayout from './views/SlugApp.vue';
 import TenantLogin from './views/Login.vue';
 import Dashboard from './views/Dashboard.vue';
+import SetPassword from './views/SetPassword.vue';
 
 // Lazy views
 const RunSheets        = () => import('./views/RunSheets.vue');
@@ -101,6 +102,7 @@ const router = createRouter({
         return { name: 'marketing', replace: true };
       },
     },
+    { path: '/set-password', name: 'set-password', component: SetPassword },
 
     {
       path: '/:slug',
@@ -132,7 +134,6 @@ const router = createRouter({
           component: () => import('./views/Members.vue'),
           meta: { requiresAuth: true, requiresMembership: true },
         },
-
         {
           path: '',
           name: 'tenant-home',

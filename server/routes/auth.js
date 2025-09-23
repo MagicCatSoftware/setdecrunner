@@ -1,6 +1,7 @@
 // server/routes/auth.js
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto'
 
 import User from '../models/User.js';
 import Production, { normalizeSlug } from '../models/Production.js';
@@ -12,6 +13,7 @@ import {
   GOOGLE_ENABLED,
   FACEBOOK_ENABLED,
 } from '../passport.js';
+import { signToken } from '../utils/jwt.js';
 
 const router = Router();
 const ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
@@ -73,6 +75,45 @@ router.post('/local/register', async (req, res) => {
   }
 });
 
+router.post('/complete-reset', async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    if (!token || !password) {
+      return res.status(400).json({ error: 'token and password required' });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      resetTokenHash: hash,
+      resetExpiresAt: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired reset token.' });
+    }
+
+    await user.setPassword(password);
+    user.resetTokenHash = undefined;
+    user.resetExpiresAt = undefined;
+    user.verified = true; // optional: mark verified after a reset
+    await user.save();
+
+    const jwt = signToken(user);
+    return res.json({
+      ok: true,
+      token: jwt,
+      user: { _id: user._id, email: user.email, name: user.name, role: user.role},
+    });
+  } catch (e) {
+    console.error('[complete-reset] error', e);
+    return res.status(500).json({ error: 'Failed to complete password reset.' });
+  }
+});
+
 // Login (local) — user must already be a member of the slug’s production
 router.post('/local/login', async (req, res) => {
   try {
@@ -92,7 +133,7 @@ router.post('/local/login', async (req, res) => {
       .select('_id slug')
       .lean();
     if (!prod) return sendError(res, 404, 'Production not found');
-
+    console.log(user);
     const isMember = (user.productionIds || []).map(String).includes(String(prod._id));
     if (!isMember) return sendError(res, 403, 'Not authorized for this production');
 

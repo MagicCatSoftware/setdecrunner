@@ -18,7 +18,6 @@
 
         <div class="toolbar__spacer"></div>
 
-        <!-- New: Create user -->
         <button class="btn btn--primary" @click="openCreate" :disabled="creating">
           + Create User
         </button>
@@ -67,6 +66,7 @@
                     @change="save(u)"
                   >
                     <option value="admin">admin</option>
+                    <option value="coordinator">coordinator</option>
                     <option value="driver">driver</option>
                     <option value="user">user</option>
                   </select>
@@ -193,6 +193,7 @@
             <select class="select" v-model="createForm.role">
               <option value="user">user</option>
               <option value="driver">driver</option>
+              <option value="coordinator">coordinator</option>
               <option value="admin">admin</option>
             </select>
           </div>
@@ -234,7 +235,7 @@ const notice = ref('');
 const savingId = ref('');
 const lastUpdated = ref('');
 
-const active = ref(null); // currently viewed profile
+const active = ref(null);
 
 // Create modal state
 const createOpen = ref(false);
@@ -270,12 +271,11 @@ function toId(v) {
   if (nested && nested !== v) return toId(nested);
   try { const s = v.toString?.(); return HEX24.test(s) ? s : ''; } catch { return ''; }
 }
-const idsEqual = (a, b) => {
-  const A = toId(a), B = toId(b);
-  return !!A && !!B && A === B;
-};
 
 async function ensureProduction() {
+  // Keep current prod id if we already have one; otherwise try to resolve from slug
+  if (HEX24.test(resolvedProdId.value)) return;
+  if (!slug.value) return;
   try {
     const p = await apiGet(`/tenant/productions/${slug.value}`);
     prod.value = p || null;
@@ -289,35 +289,14 @@ async function ensureProduction() {
   }
 }
 
-function isAdminForProduction(userId) {
- 
-  if (!prod.value) return false;
-  const ownerId = toId(prod.value.ownerUserId ?? prod.value.owner);
-  if (ownerId && idsEqual(ownerId, userId)) return true;
-
-  const mem = prod.value.members || [];
-  for (const m of mem) {
-    const mid = toId(m?.user ?? m?._id ?? m);
-    if (!mid) continue;
-    if (idsEqual(mid, userId)) {
-      const role = String(m?.role || '').toLowerCase();
-      return role === 'admin';
-    }
-  }
-  return false;
-}
-
 /* ---------- request helpers ---------- */
 function prodIdHeader() {
   const pid = String(resolvedProdId.value || '').trim();
   return HEX24.test(pid) ? { 'x-production-id': pid } : {};
 }
-function userIdHeader() {
-  const uid = toId(me.value?._id || me.value);
-  return HEX24.test(uid) ? { 'x-user-id': uid } : {};
-}
 function authHeaders() {
-  return { ...prodIdHeader(), ...userIdHeader() };
+  // Your api helper should also attach Authorization: Bearer <JWT>
+  return { ...prodIdHeader() };
 }
 function qs(obj = {}) {
   const s = new URLSearchParams(obj).toString();
@@ -340,15 +319,26 @@ const longDate = (d) => {
 };
 const isSelf = (u) => me.value && u?._id === me.value._id;
 
-/* ---------- data actions ---------- */
+/* ---------- admin probe ---------- */
+async function checkAdminAccess() {
+  const pid = String(resolvedProdId.value || '').trim();
+  if (!HEX24.test(pid)) return false;
+  try {
+    await api.get('/tenant/admin/users?probe=1', { headers: authHeaders() });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/* ---------- data actions (admin endpoints) ---------- */
 const load = async () => {
   if (!allowed.value) return;
   loading.value = true; error.value = '';
   try {
     const headers = authHeaders();
     const query = q.value ? { q: q.value } : {};
-    // GET with query string + headers
-    list.value = await api.get('/tenant/users' + qs(query), { headers });
+    list.value = await api.get('/tenant/admin/users' + qs(query), { headers });
     stamp();
   } catch (e) {
     error.value = e?.response?.data?.error || e.message || 'Failed to load users';
@@ -364,7 +354,7 @@ const save = async (u) => {
   try {
     const headers = authHeaders();
     const body = { role: u.role, siteAuthorized: !!u.siteAuthorized, banned: !!u.banned };
-    const updated = await api.patch(`/tenant/users/${u._id}`, body, { headers });
+    const updated = await api.patch(`/tenant/admin/users/${u._id}`, body, { headers });
     Object.assign(u, updated);
     notice.value = 'Changes saved';
     setTimeout(() => (notice.value = ''), 1200);
@@ -388,11 +378,11 @@ const toggleBan = async (u) => {
 
 const removeUser = async (u) => {
   if (isSelf(u)) { alert('You cannot remove your own account from here.'); return; }
-  if (!confirm(`Remove user "${u.name || u.email || 'account'}"? This cannot be undone.`)) return;
+  if (!confirm(`Remove user "${u.name || u.email || 'account'}" from this production?`)) return;
   savingId.value = u._id; error.value = '';
   try {
     const headers = authHeaders();
-    await api.del(`/tenant/users/${u._id}`, { headers });
+    await api.del(`/tenant/admin/users/${u._id}`, { headers });
     list.value = list.value.filter(x => x._id !== u._id);
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to remove user';
@@ -402,22 +392,16 @@ const removeUser = async (u) => {
   }
 };
 
-const view = async (u) => {
-  try {
-    const headers = authHeaders();
-    active.value = await api.get(`/tenant/users/${u._id}`, { headers });
-  } catch (e) {
-    error.value = e?.response?.data?.error || 'Failed to load profile';
-  }
+const view = (u) => {
+  active.value = { ...u };
 };
 
 const reloadSingle = async (id) => {
   try {
-    const headers = authHeaders();
-    const fresh = await api.get(`/tenant/users/${id}`, { headers });
-    const idx = list.value.findIndex(u => u._id === id);
-    if (idx >= 0) list.value[idx] = fresh;
-    if (active.value?._id === id) active.value = fresh;
+    const prevActiveId = active.value?._id;
+    await load();
+    const fresh = list.value.find(x => x._id === id);
+    if (fresh && prevActiveId === id) active.value = { ...fresh };
   } catch { /* ignore */ }
 };
 
@@ -440,18 +424,22 @@ const createUser = async () => {
     creating.value = true;
 
     const headers = authHeaders();
-    // Endpoint that creates + invites; adjust path if your server uses a different one
-    await api.post('/tenant/admin/users', {
+    const body = {
       firstName: createForm.value.firstName || undefined,
       lastName:  createForm.value.lastName  || undefined,
       email:     createForm.value.email,
       username:  createForm.value.username || undefined,
       role:      createForm.value.role,
-      siteAuthorized: !!createForm.value.siteAuthorized
-    }, { headers });
+      siteAuthorized: !!createForm.value.siteAuthorized, // send directly on POST
+    };
+
+    const resp = await api.post('/tenant/admin/users', body, { headers });
+
+    // resp is expected to be { ok: true, userId, productionId }
+    if (!resp?.ok) throw new Error('Create failed');
 
     createMsg.value = 'Invitation sent';
-    await load();            // refresh list
+    await load();
     setTimeout(() => { closeCreate(); }, 600);
   } catch (e) {
     createError.value = e?.response?.data?.error || e.message || 'Failed to create user';
@@ -463,299 +451,48 @@ const createUser = async () => {
 /* ---------- lifecycle ---------- */
 onMounted(async () => {
   me.value = await auth.fetchMe();
-  await ensureProduction();
-
-  // production admin gate (owner or member role === 'admin')
-  allowed.value = apiGet('/auth/me');
+  await ensureProduction(); // resolve production id
+  allowed.value = await checkAdminAccess(); // backend is source of truth
   checked.value = true;
-
   if (allowed.value) await load();
 });
 </script>
 
 <style scoped>
-/* Layout */
-.users-page {
-  padding: 16px;
-  max-width: 960px;
-  margin: 0 auto;
-  display: grid;
-  gap: 16px;
-  box-sizing: border-box;
-}
-
-/* Cards / Surfaces */
-.card {
-  background: #fff;
-  border: 1px solid #E5E7EB; /* gray-200 */
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
-}
-
-/* Toolbar */
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  background: #fff;
-  border: 1px solid #E5E7EB;
-  border-radius: 12px;
-  padding: 12px;
-  box-shadow: 0 1px 2px rgba(16,24,40,.04);
-}
-.toolbar__stamp {
-  margin-left: auto;
-  font-size: 12px;
-  color: #6B7280; /* gray-500 */
-}
-
-/* Inputs / selects / buttons */
-.input, .select {
-  border: 1px solid #D1D5DB; /* gray-300 */
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 14px;
-  min-width: 280px;
-  outline: none;
-  transition: box-shadow .15s, border-color .15s;
-  background: #fff;
-}
-.input:focus, .select:focus {
-  border-color: #6366F1; /* indigo-500 */
-  box-shadow: 0 0 0 3px rgba(99,102,241,.2);
-}
-
-.btn {
-  border: 1px solid #D1D5DB;
-  background: #fff;
-  color: #111827; /* gray-900 */
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background .15s, border-color .15s, box-shadow .15s, color .15s;
-}
-.btn:hover { background: #F9FAFB; }
-.btn:disabled { opacity: .6; cursor: not-allowed; }
-
-.btn--primary {
-  background: #4F46E5; /* indigo-600 */
-  color: #fff;
-  border-color: #4F46E5;
-}
-.btn--primary:hover { background: #4338CA; border-color: #4338CA; }
-
-.btn--danger {
-  color: #B91C1C; /* red-700 */
-  border-color: #FCA5A5; /* red-300 */
-  background: #FEF2F2; /* red-50 */
-}
-.btn--danger:hover {
-  background: #FEE2E2; /* red-100 */
-}
-
-.btn--ghost {
-  background: transparent;
-  border-color: #E5E7EB;
-}
-.btn--ghost:hover {
-  background: #F9FAFB;
-}
-
-/* Table */
-.table-wrap {
-  overflow-x: auto;
-}
-.table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 14px;
-}
-.table thead th {
-  position: sticky;
-  top: 0;
-  background: #F9FAFB; /* gray-50 */
-  text-align: left;
-  padding: 10px;
-  font-weight: 600;
-  color: #374151; /* gray-700 */
-  border-bottom: 1px solid #E5E7EB;
-}
-.table tbody tr {
-  border-top: 1px solid #E5E7EB;
-}
-.table tbody td {
-  padding: 10px;
-  vertical-align: middle;
-}
-.table tbody tr:hover {
-  background: #FAFAFA;
-}
-.text-right { text-align: right; }
-.small { font-size: 12px; color: #374151; }
-
-/* Cells */
-.usercell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 160px;
-}
-.email { max-width: 260px; }
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ucase { text-transform: uppercase; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-
-/* Avatar */
-.avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 9999px;
-  object-fit: cover;
-}
-.avatar--lg {
-  width: 48px;
-  height: 48px;
-}
-
-/* Pills / statuses */
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  border: 1px solid transparent;
-}
-.pill--ok {
-  color: #065F46;            /* emerald-800 */
-  background: #ECFDF5;       /* emerald-50 */
-  border-color: #A7F3D0;     /* emerald-300 */
-}
-.pill--danger {
-  color: #991B1B;            /* red-800 */
-  background: #FEF2F2;       /* red-50 */
-  border-color: #FCA5A5;     /* red-300 */
-}
-.pill--muted {
-  color: #374151;            /* gray-700 */
-  background: #F3F4F6;       /* gray-100 */
-  border-color: #E5E7EB;     /* gray-200 */
-}
-
-/* Checkbox label */
-.check {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  user-select: none;
-}
-
-/* Empty state */
-.empty {
-  padding: 12px;
-  border-top: 1px dashed #E5E7EB;
-}
-.muted { color: #6B7280; }
-
-/* Errors */
-.error {
-  color: #B91C1C;
-  font-size: 14px;
-}
-
-/* Modal */
-.modal {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-}
-.modal__backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,.4);
-}
-.modal__card {
-  position: relative;
-  width: 100%;
-  max-width: 560px;
-  background: #fff;
-  border-radius: 12px;
-  border: 1px solid #E5E7EB;
-  box-shadow: 0 10px 30px rgba(0,0,0,.08);
-  padding: 16px;
-  display: grid;
-  gap: 12px;
-}
-.modal__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-.modal__foot {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding-top: 12px;
-  border-top: 1px solid #E5E7EB;
-}
-.title {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-/* Profile top */
-.profile {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.profile__name {
-  font-weight: 600;
-}
-
-/* Profile details grid */
-.details {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap: 12px;
-}
-.label {
-  color: #6B7280;
-}
-
-/* Scrollbar polish (WebKit) */
-.table-wrap::-webkit-scrollbar {
-  height: 8px;
-}
-.table-wrap::-webkit-scrollbar-track {
-  background: #F3F4F6;
-  border-radius: 999px;
-}
-.table-wrap::-webkit-scrollbar-thumb {
-  background: #D1D5DB;
-  border-radius: 999px;
-}
-.table-wrap::-webkit-scrollbar-thumb:hover {
-  background: #9CA3AF;
-}
-
-/* Responsive tweaks */
-@media (max-width: 640px) {
-  .input { min-width: 0; width: 100%; }
-  .toolbar { gap: 10px; }
-  .toolbar__stamp { width: 100%; margin-left: 0; text-align: right; }
-  .details { grid-template-columns: 1fr; }
-}
+.users-page { padding: 16px; }
+.toolbar { display:flex; gap:8px; align-items:center; }
+.toolbar__spacer { flex:1; }
+.toolbar__stamp { color:#6c737f; font-size:12px; }
+.card { background:#fff; border:1px solid #ececec; border-radius:12px; padding:8px; }
+.table { width:100%; border-collapse:collapse; }
+.table th, .table td { padding:10px; border-bottom:1px solid #eee; vertical-align:middle; }
+.text-right { text-align:right; }
+.input { padding:8px 10px; border:1px solid #ddd; border-radius:8px; }
+.select { padding:6px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; }
+.btn { padding:8px 12px; border-radius:10px; border:1px solid #ddd; background:#f8f8f8; }
+.btn--primary { background:#111; color:#fff; border-color:#111; }
+.btn--danger { background:#c62828; color:#fff; border-color:#c62828; }
+.btn--ghost { background:transparent; }
+.muted { color:#6c737f; }
+.error { color:#c62828; }
+.notice { color:#1b5e20; }
+.usercell { display:flex; gap:8px; align-items:center; }
+.avatar { width:28px; height:28px; border-radius:50%; object-fit:cover; }
+.avatar--lg { width:64px; height:64px; }
+.truncate { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; }
+.pill--ok { background:#e8f5e9; color:#2e7d32; }
+.pill--muted { background:#f5f5f5; color:#607d8b; }
+.pill--danger { background:#ffebee; color:#c62828; }
+.ucase { text-transform:uppercase; }
+.small { font-size:12px; }
+.table-wrap { overflow:auto; }
+.modal { position:fixed; inset:0; display:grid; place-items:center; z-index:1000; }
+.modal__backdrop { position:absolute; inset:0; background:rgba(0,0,0,.25); }
+.modal__card { position:relative; z-index:1; width:100%; max-width:600px; background:#fff; border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.15); }
+.modal__head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.profile { display:flex; gap:12px; align-items:center; margin:10px 0; }
+.details { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:10px 0 16px; }
 </style>
+
+

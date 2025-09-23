@@ -1,5 +1,7 @@
 <template>
+  
   <div class="container">
+    
     <div class="card">
       <h1 class="title">
         Access <span class="slug">/{{ route.params.slug }}</span>
@@ -78,6 +80,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiPost, apiGet } from '../api.js';
+
 
 const route = useRoute();
 const router = useRouter();
