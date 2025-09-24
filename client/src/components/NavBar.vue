@@ -22,14 +22,10 @@
       <RouterLink class="nav__link" :to="{ name: 'places', params: { slug } }" draggable="false">Places</RouterLink>
       <RouterLink class="nav__link" :to="{ name: 'suppliers', params: { slug } }" draggable="false">Suppliers</RouterLink>
 
-      <!-- Productions -->
-      <RouterLink
-        class="nav__link"
-        :to="{ name: 'productions', params: { slug } }"
-        draggable="false"
-      >
+      <RouterLink class="nav__link" :to="{ name: 'productions', params: { slug } }" draggable="false">
         Productions
       </RouterLink>
+
       <RouterLink
         v-if="canEditCurrent"
         class="nav__link"
@@ -38,6 +34,7 @@
       >
         Production Settings
       </RouterLink>
+
       <RouterLink
         v-if="canCreateProduction"
         class="nav__link"
@@ -47,7 +44,6 @@
         New Production
       </RouterLink>
 
-      <!-- Members/Admin -->
       <RouterLink
         v-if="showMembersLink"
         :to="{ name: 'tenant-members', params: { slug } }"
@@ -57,6 +53,7 @@
         Members
       </RouterLink>
 
+      <!-- Show ONLY if current user is owner or in admins found in production.members -->
       <RouterLink
         v-if="showAdminUsersLink"
         class="nav__link nav__link--admin"
@@ -77,7 +74,7 @@
         draggable="false"
       />
       <span class="nav__name" :title="displayName">{{ displayName }}</span>
-      <button class="btn" @click="logoutsession">Logout</button>
+      <button class="btn" @click="onLogoutClick">Logout</button>
     </div>
   </nav>
 </template>
@@ -85,17 +82,17 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { logout } from '../auth.js';
-import { apiGet } from '../api.js';
+import { useAuth, performLogout } from '../auth.js';
+import api, { apiGet } from '../api.js';
 
 const router = useRouter();
 const route  = useRoute();
+const auth   = useAuth();
 
 const props = defineProps({
   me: { type: Object, default: null },
   company: { type: Object, default: null },
 });
-defineEmits(['logout']);
 
 const slug = computed(() => String(route.params.slug || ''));
 
@@ -108,7 +105,7 @@ const user = computed(() => {
 const currentUserId = computed(() => toId(user.value?._id || user.value));
 
 /* ---------------- production fetch (to inspect members/roles) ---------------- */
-const prod = ref(null); // {_id, ownerUserId, title, productioncompany, members:[{user,role}] }
+const prod = ref(null); // {_id, ownerUserId|owner, title, members:[{user,role}|ObjectId] }
 const HEX24_RE = /^[a-f0-9]{24}$/i;
 
 function toId(v) {
@@ -130,51 +127,74 @@ const idsEqual = (a, b) => {
 async function fetchProduction() {
   if (!slug.value) { prod.value = null; return; }
   try {
-    // Server should support fetching by slug
+    // Server supports fetching by slug
     const p = await apiGet(`/tenant/productions/${slug.value}`);
     prod.value = p || null;
 
+    // Keep both storage and API helper in sync so subsequent calls carry the header
     const pid = toId(p?._id);
-    if (pid) localStorage.setItem('currentProductionId', pid);
+    if (pid) {
+      localStorage.setItem('currentProductionId', pid);
+      api.setProductionId(pid);
+    }
   } catch {
     prod.value = null;
   }
 }
 watch(() => slug.value, fetchProduction);
 
-/* ---------------- role checks ---------------- */
+/* ---------------- derive admin set from members ---------------- */
+function roleIsAdmin(r) {
+  if (!r) return false;
+  const s = String(r).trim().toLowerCase();
+  // be generous with common admin strings
+  return s === 'admin' || s === 'administrator' || s === 'owner';
+}
+
+// list of admin userIds from members (role=admin) + owner as admin
+const productionAdminIds = computed(() => {
+  const out = new Set();
+  const p = prod.value || {};
+  const ownerId = toId(p.ownerUserId ?? p.owner);
+  if (ownerId) out.add(ownerId);
+
+  const members = Array.isArray(p.members) ? p.members : [];
+  for (const m of members) {
+    // m can be ObjectId or object { user, role } or { _id, role }
+    const uid = toId(m?.user ?? m?._id ?? m);
+    const role = (m && typeof m === 'object')
+      ? (m.role ?? (Array.isArray(m.roles) ? m.roles.find(roleIsAdmin) : null))
+      : null;
+
+    if (uid && roleIsAdmin(role)) out.add(uid);
+  }
+  return out;
+});
+
 const isOwner = computed(() => {
   const ownerId = toId(prod.value?.ownerUserId ?? prod.value?.owner);
   return !!ownerId && idsEqual(ownerId, currentUserId.value);
 });
-const isAdminByMembers = computed(() => {
-  const members = prod.value?.members;
-  if (!Array.isArray(members)) return false;
-  for (const m of members) {
-    if (m && typeof m === 'object') {
-      const mid = toId(m.user ?? m._id ?? m.id ?? m);
-      if (!mid) continue;
-      if (idsEqual(mid, currentUserId.value)) {
-        const role = String(m.role || '').toLowerCase();
-        if (role === 'admin') return true;
-      }
-    }
-  }
-  return false;
+const isCurrentUserAdmin = computed(() => {
+  const myId = currentUserId.value;
+  if (!myId) return false;
+  return productionAdminIds.value.has(myId);
 });
 
+// This one is exactly what you asked for: if current user is in the
+// admin set derived from production.members (or is owner), show the link.
+const showAdminUsersLink = computed(() => isOwner.value || isCurrentUserAdmin.value);
+
+// Keep the other links using the same admin logic
 const currentProdId = computed(() => toId(prod.value?._id));
-const canEditCurrent = computed(() => isOwner.value || isAdminByMembers.value);
-const canCreateProduction = computed(() => isOwner.value || isAdminByMembers.value); // adjust if anyone can create
-const showAdminUsersLink = computed(() => canEditCurrent.value);
+const canEditCurrent = computed(() => isOwner.value || isCurrentUserAdmin.value);
+const canCreateProduction = computed(() => isOwner.value || isCurrentUserAdmin.value);
 const showMembersLink    = computed(() => canEditCurrent.value);
 
 /* ---------------- presentation helpers ---------------- */
 const productionLabel = computed(() => {
   const p = prod.value || {};
   return (
-    p.productioncompany ||
-    p.vCompanyName ||
     p.title ||
     props.company?.companyProduction ||
     (slug.value ? `/${slug.value}` : '')
@@ -184,9 +204,6 @@ const productionTooltip = computed(() => {
   const p = prod.value || {};
   const lines = [];
   if (p.title) lines.push(`Title: ${p.title}`);
-  if (p.productioncompany) lines.push(`Company: ${p.productioncompany}`);
-  if (p.productionaddress) lines.push(`Address: ${p.productionaddress}`);
-  if (p.productionphone) lines.push(`Phone: ${p.productionphone}`);
   return lines.join('\n') || '';
 });
 
@@ -210,7 +227,6 @@ const rawPhoto = computed(() => {
 });
 const rawApiBase = (import.meta.env.VITE_API_BASE || 'http://localhost:4000/api').replace(/\/+$/, '');
 const apiOrigin  = rawApiBase.replace(/\/api\/?$/, '') || window.location.origin;
-
 function normalizePhoto(p) {
   if (!p) return '';
   if (/^(?:https?:)?\/\//i.test(p) || p.startsWith('data:')) {
@@ -235,14 +251,21 @@ function normalizePhoto(p) {
 const photoSrc = computed(() => normalizePhoto(rawPhoto.value));
 
 /* ---------------- actions ---------------- */
-function logoutsession() {
-  const s = String(route.params.slug || '');
-  logout(router, s);
+async function onLogoutClick() {
+  try {
+    await auth.logout({ clearTenant: true });
+  } catch {
+    // ignore
+  } finally {
+    const s = slug.value || '';
+    router.replace({ name: 'tenant-login', params: { slug: s } });
+  }
 }
 
 /* ---------------- lifecycle ---------------- */
 onMounted(fetchProduction);
 </script>
+
 
 
 <style scoped>

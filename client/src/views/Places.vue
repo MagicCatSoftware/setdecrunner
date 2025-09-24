@@ -20,7 +20,7 @@
           <input
             ref="gmSearchEl"
             :disabled="!gmReady"
-            :placeholder="gmReady ? 'Search Google Places…' : 'Google Places disabled (no API key)'"
+            :placeholder="gmReady ? 'Search Google Places…' : gmPlaceholder"
             class="input gm__input"
           />
           <button
@@ -32,6 +32,15 @@
             Use selection
           </button>
         </div>
+
+        <button
+          v-if="!gmReady"
+          class="btn"
+          @click="retryGoogle"
+          :title="gmError || 'Try reloading the Google Maps script'"
+        >
+          Reload Google
+        </button>
 
         <!-- Optional: raw import by place_id -->
         <details class="tiny">
@@ -54,6 +63,9 @@
         <div class="map-head">
           <div class="map-title">Places Map</div>
           <div class="muted small" v-if="mapStatus">{{ mapStatus }}</div>
+          <div class="warn small" v-if="!gmReady">
+            Google Maps unavailable. You can still create and edit places. Click “Reload Google” to try again.
+          </div>
         </div>
         <div ref="mapEl" class="map"></div>
       </div>
@@ -97,12 +109,7 @@
         <div class="modal__card">
           <div class="modal__head">
             <h3 class="title">{{ creatingNew ? 'New Place' : (editing._id ? 'Edit Place' : 'New Place') }}</h3>
-            <button
-  class="btn"
-  @click="() => { editing=null; $router.push(`/${slug}/places`) }"
->
-  Close
-</button>
+            <button class="btn" @click="closeEditor">Close</button>
           </div>
 
           <!-- Google Places inside editor -->
@@ -110,7 +117,7 @@
             <input
               ref="gmEditorEl"
               :disabled="!gmReady"
-              :placeholder="gmReady ? 'Search Google Places to prefill…' : 'Google Places disabled'"
+              :placeholder="gmReady ? 'Search Google Places to prefill…' : gmPlaceholder"
               class="input input--grow"
             />
             <button
@@ -119,6 +126,14 @@
               @click="applyEditorSelection"
             >
               Apply selection
+            </button>
+            <button
+              v-if="!gmReady"
+              class="btn"
+              @click="retryGoogle"
+              :title="gmError || 'Try reloading the Google Maps script'"
+            >
+              Reload Google
             </button>
           </div>
 
@@ -202,7 +217,6 @@
             <button class="btn" @click="closeItemsAt">Close</button>
           </div>
 
-          <!-- Items toolbar -->
           <div class="toolbar toolbar--tight card card--flat">
             <input v-model="itemQ" placeholder="Search items at this place" class="input input--grow" />
             <button class="btn" @click="loadItemsAt">Search</button>
@@ -216,7 +230,6 @@
             </button>
           </div>
 
-          <!-- Items list -->
           <div v-if="itemsLoading" class="muted">Loading…</div>
           <div v-else class="list">
             <div v-for="it in itemsList" :key="it._id" class="card item">
@@ -284,81 +297,97 @@ const quickItemName = ref('');
 const quickItemQty = ref(1);
 const addingItem = ref(false);
 
-const IMAGE_BASE = import.meta.env.IMAGE_BASE || '/api'; // leave empty for same-origin
-const VITE_API_BASE = import.meta.env.VITE_API_BASE || '/api';
-
+const IMAGE_BASE_ORIGIN = (import.meta.env.VITE_API_BASE || '');
 
 function imageUrl(p) {
   if (!p) return '';
-  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  if (/^https?:\/\//i.test(p) || p.startsWith('data:')) return p;
   let path = String(p);
-
-  // normalize to /uploads/...
-  if (!path.startsWith('/')) {
-    path = '/' + path;
-  }
-  if (!path.startsWith('/uploads/')) {
-    path = '/uploads/' + path.replace(/^\/+/, '/api/');
-  }
-
-
-
-  // encode just the filename, not the whole path
-  const parts = path.split('/');
-  const file = parts.pop();
-  return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
+  if (!path.startsWith('/')) path = '/' + path;
+  if (!path.startsWith('/uploads/')) path = '/uploads' + path; // normalize
+  return (IMAGE_BASE_ORIGIN || '') + path;
 }
 
 const mapsUrl = (lat, lng) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+const qs = (obj = {}) => { const s = new URLSearchParams(obj).toString(); return s ? `?${s}` : ''; };
 
-const qs = (obj = {}) => {
-  const s = new URLSearchParams(obj).toString();
-  return s ? `?${s}` : '';
-};
-
-/* ---------------- Google Maps / Places integration ---------------- */
+/* ---------------- Google Maps / Places integration (robust) ---------------- */
 const gmApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const gmReady = ref(false);
-const gmSearchEl = ref(null);  // toolbar autocomplete input
-const gmEditorEl = ref(null);  // editor autocomplete input
-const gmSvcEl = ref(null);     // container for PlacesService
+const gmError = ref('');
+const gmStatus = ref('');
+const gmPlaceholder = computed(() =>
+  gmApiKey ? (gmError.value ? `Google disabled (${gmError.value})` : 'Google Places disabled') : 'Google Places disabled (no API key)'
+);
+
+const gmSearchEl = ref(null);
+const gmEditorEl = ref(null);
+const gmSvcEl = ref(null);
 let toolbarAC = null;
 let editorAC = null;
 let placesSvc = null;
 
-const toolbarSelected = ref(null);
-const editorSelected = ref(null);
-const lastGooglePlaceId = ref('');
+// Single loader instance with retry
+let googleLoadPromise = null;
+function loadGoogleOnce(apiKey, { retries = 1 } = {}) {
+  if (window.google?.maps?.places) return Promise.resolve(window.google);
+  if (googleLoadPromise) return googleLoadPromise;
 
-function loadGoogle(apiKey) {
-  return new Promise((resolve, reject) => {
-    if (window.google?.maps?.places) return resolve(window.google);
-    if (!apiKey) return reject(new Error('Missing Google API key'));
-    const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=weekly`;
-    s.async = true;
-    s.onerror = () => reject(new Error('Failed to load Google Maps JS'));
+  googleLoadPromise = new Promise((resolve, reject) => {
+    if (!apiKey) return reject(new Error('Missing API key'));
+    const id = 'gmaps-sdk';
+    let s = document.getElementById(id);
+    if (!s) {
+      s = document.createElement('script');
+      s.id = id;
+      s.async = true;
+      s.defer = true;
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=weekly`;
+      s.onerror = () => reject(new Error('Failed to load Google JS'));
+      document.head.appendChild(s);
+    } else if (s.getAttribute('data-failed') === '1') {
+      // previous failure: replace the tag
+      s.remove();
+      const s2 = document.createElement('script');
+      s2.id = id;
+      s2.async = true;
+      s2.defer = true;
+      s2.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=weekly`;
+      s2.onerror = () => reject(new Error('Failed to load Google JS'));
+      document.head.appendChild(s2);
+      s = s2;
+    }
     s.onload = () => resolve(window.google);
-    document.head.appendChild(s);
+  })
+  .catch(async (err) => {
+    googleLoadPromise = null;
+    if (retries > 0) {
+      await new Promise(r => setTimeout(r, 800));
+      return loadGoogleOnce(apiKey, { retries: retries - 1 });
+    }
+    throw err;
   });
+
+  return googleLoadPromise;
 }
 
 function ensurePlacesService() {
-  const google = window.google;
+  if (!window.google?.maps?.places) return null;
   if (!placesSvc) {
     const node = gmSvcEl.value || document.createElement('div');
-    placesSvc = new google.maps.places.PlacesService(node);
+    placesSvc = new window.google.maps.places.PlacesService(node);
   }
   return placesSvc;
 }
 
 function getDetailsById(placeId) {
   return new Promise((resolve) => {
-    const google = window.google;
-    ensurePlacesService().getDetails(
+    const svc = ensurePlacesService();
+    if (!svc || !window.google?.maps?.places) return resolve(null);
+    svc.getDetails(
       { placeId, fields: ['name','formatted_address','geometry','formatted_phone_number','website','place_id'] },
       (res, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && res) resolve(res);
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && res) resolve(res);
         else resolve(null);
       }
     );
@@ -396,7 +425,7 @@ async function enrichWithDetails(place) {
 }
 
 function bindEditorAutocomplete() {
-  if (!gmReady.value || !gmEditorEl.value) return;
+  if (!gmReady.value || !gmEditorEl.value || !window.google?.maps?.places) return;
 
   try {
     if (editorAC && window.google?.maps?.event) {
@@ -434,7 +463,7 @@ function bindEditorAutocomplete() {
 }
 
 function initToolbarAutocomplete() {
-  if (!gmReady.value || !gmSearchEl.value || toolbarAC) return;
+  if (!gmReady.value || !gmSearchEl.value || toolbarAC || !window.google?.maps?.places) return;
   toolbarAC = new window.google.maps.places.Autocomplete(
     gmSearchEl.value,
     { fields: ['place_id','name','formatted_address','geometry'] }
@@ -446,27 +475,61 @@ function initToolbarAutocomplete() {
   });
 }
 
+const toolbarSelected = ref(null);
+const editorSelected = ref(null);
+const lastGooglePlaceId = ref('');
+
+async function applyToolbarSelection() {
+  if (!toolbarSelected.value) return;
+  if (!editing.value) {
+    await createPlace();
+  }
+  const data = await enrichWithDetails(toolbarSelected.value);
+  Object.assign(editing.value, data);
+}
+
+async function applyEditorSelection() {
+  // If editorSelected was set via your own UI; the AC path already handles selection
+  if (!editorSelected.value) return;
+  const data = await enrichWithDetails(editorSelected.value);
+  if (!editing.value) editing.value = blankPlace();
+  Object.assign(editing.value, data);
+}
+
 async function setupGoogle() {
+  gmError.value = '';
+  gmStatus.value = 'Loading Google…';
   try {
-    await loadGoogle(gmApiKey);
-    gmReady.value = true;
+    await loadGoogleOnce(gmApiKey, { retries: 2 });
+    gmReady.value = !!(window.google?.maps?.places);
+    if (!gmReady.value) throw new Error('Google API unavailable');
     initToolbarAutocomplete();
     await initMapIfNeeded();
     updateMarkers();
-  } catch {
+    gmStatus.value = '';
+  } catch (e) {
     gmReady.value = false;
+    gmError.value = e?.message || 'Failed to load Google JS';
+    gmStatus.value = '';
   }
+}
+
+function retryGoogle() {
+  toolbarAC = null;
+  editorAC = null;
+  placesSvc = null;
+  setupGoogle();
 }
 /* ------------------------------------------------------------------ */
 
 const load = async () => {
   loading.value = true; error.value = '';
   try {
-    const res = await api.get('/tenant/places');
+    const res = await api.get('/tenant/places', { params: q.value ? { q: q.value } : undefined });
     list.value = Array.isArray(res) ? res : (res.items || []);
     updateMarkers();
   } catch (e) {
-    error.value = e?.body?.error || e?.message || 'Failed to load places';
+    error.value = e?.response?.data?.error || e?.body?.error || e?.message || 'Failed to load places';
   } finally {
     loading.value = false;
   }
@@ -502,6 +565,11 @@ const createPlace = async () => {
   gmEditorEl.value?.focus();
 };
 
+const closeEditor = () => {
+  editing.value = null;
+  router.push({ name: 'places', params: { slug: slug.value } });
+};
+
 const openEditor = async (p) => {
   creatingNew.value = false;
   editing.value = JSON.parse(JSON.stringify(p));
@@ -519,52 +587,41 @@ function normalizePayloadForSave(src) {
 }
 
 const save = async () => {
-  if (!editing.value?.name?.trim()) { 
-    error.value = 'Name is required'; 
-    return; 
+  if (!editing.value?.name?.trim()) {
+    error.value = 'Name is required';
+    return;
   }
-  saving.value = true; 
+  saving.value = true;
   error.value = '';
 
   try {
     const payload = normalizePayloadForSave(editing.value);
-
-    const token  = localStorage.getItem('token') || '';
-    const prodId = localStorage.getItem('currentProductionId') || '';
-
-    const res = await fetch(`/tenant/places${creatingNew.value ? '' : '/' + editing.value._id}`, {
-      method: creatingNew.value ? 'POST' : 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token  ? { Authorization: `Bearer ${token}` } : {}),
-        ...(prodId ? { 'x-production-id': prodId } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.error || 'Failed to save place');
+    const path = creatingNew.value ? '/tenant/places' : `/tenant/places/${editing.value._id}`;
+    const data = creatingNew.value
+      ? await api.post(path, payload)
+      : await api.patch(path, payload);
 
     editing.value = data;
     creatingNew.value = false;
     await load();
   } catch (e) {
-    error.value = e?.message || 'Failed to save place';
+    error.value = e?.response?.data?.error || e?.body?.error || e?.message || 'Failed to save place';
   } finally {
     saving.value = false;
   }
 };
+
 const del = async (p) => {
   if (!confirm(`Delete place "${p.name}"?`)) return;
   try {
-    await api.delete(`/tenant/places/${p._id}`);
+    await api.del(`/tenant/places/${p._id}`);
     await load();
   } catch (e) {
-    error.value = e?.body?.error || 'Failed to delete place';
+    error.value = e?.response?.data?.error || e?.body?.error || 'Failed to delete place';
   }
 };
 
-// Photos (use raw fetch so FormData boundary is set by the browser)
+// Photos
 const uploadPhotos = async (e) => {
   if (!editing.value?._id) {
     await save(); // create first to get _id
@@ -574,23 +631,11 @@ const uploadPhotos = async (e) => {
   [...e.target.files].forEach(f => fd.append('photos', f));
 
   try {
-    const token  = localStorage.getItem('token') || '';
-    const prodId = localStorage.getItem('currentProductionId') || '';
-    const res = await fetch(`/tenant/places/${editing.value._id}/photos`, {
-      method: 'POST',
-      headers: {
-        ...(token  ? { Authorization: `Bearer ${token}` } : {}),
-        ...(prodId ? { 'x-production-id': prodId } : {}),
-      },
-      body: fd,
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.error || 'Failed to upload photos');
-
+    const data = await api.fetch('POST', `/tenant/places/${editing.value._id}/photos`, { body: fd });
     editing.value = data;
     await load();
   } catch (e2) {
-    error.value = e2?.message || 'Failed to upload photos';
+    error.value = e2?.response?.data?.error || e2?.message || 'Failed to upload photos';
   } finally {
     e.target.value = '';
   }
@@ -598,23 +643,11 @@ const uploadPhotos = async (e) => {
 
 const removePhoto = async (url) => {
   try {
-    const token  = localStorage.getItem('token') || '';
-    const prodId = localStorage.getItem('currentProductionId') || '';
-    const res = await fetch(`/tenant/places/${editing.value._id}/photos`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token  ? { Authorization: `Bearer ${token}` } : {}),
-        ...(prodId ? { 'x-production-id': prodId } : {}),
-      },
-      body: JSON.stringify({ url }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.error || 'Failed to remove photo');
+    const data = await api.fetch('DELETE', `/tenant/places/${editing.value._id}/photos`, { body: { url } });
     editing.value = data;
     await load();
   } catch (e) {
-    error.value = e?.message || 'Failed to remove photo';
+    error.value = e?.response?.data?.error || e?.message || 'Failed to remove photo';
   }
 };
 
@@ -628,7 +661,7 @@ const importFromGoogle = async () => {
     list.value.unshift(p);
     await openEditor(p);
   } catch (e) {
-    error.value = e?.body?.error || 'Failed to import place';
+    error.value = e?.response?.data?.error || e?.message || 'Failed to import place';
   } finally {
     importing.value = false;
   }
@@ -651,10 +684,10 @@ const loadItemsAt = async () => {
   try {
     const params = { placeId: itemsAt.value._id };
     if (itemQ.value) params.q = itemQ.value;
-    const res = await api.get('/tenant/items' + qs(params));
+    const res = await api.get('/tenant/items', { params });
     itemsList.value = Array.isArray(res) ? res : (res.items || []);
   } catch (e) {
-    itemsError.value = e?.body?.error || 'Failed to load items at this place';
+    itemsError.value = e?.response?.data?.error || e?.message || 'Failed to load items at this place';
   } finally {
     itemsLoading.value = false;
   }
@@ -671,7 +704,7 @@ const quickAddItem = async () => {
       photos: []
     });
   } catch (e) {
-    itemsError.value = e?.body?.error || 'Failed to add item';
+    itemsError.value = e?.response?.data?.error || e?.message || 'Failed to add item';
   } finally {
     addingItem.value = false;
     quickItemName.value = '';
@@ -685,13 +718,11 @@ const detachItem = async (it) => {
     await api.patch(`/tenant/items/${it._id}`, { location: null });
     await loadItemsAt();
   } catch (e) {
-    itemsError.value = e?.body?.error || 'Failed to remove item from location';
+    itemsError.value = e?.response?.data?.error || e?.message || 'Failed to remove item from location';
   }
 };
 
-/* =======================
-   Google Map (markers)
-   ======================= */
+/* ======================= Google Map (markers) ======================= */
 const mapEl = ref(null);
 let map = null;
 let infoWindow = null;
@@ -711,11 +742,10 @@ function extractLatLng(p) {
 }
 
 async function initMapIfNeeded() {
-  if (!gmApiKey) return; // no key, skip
+  if (!gmApiKey || !gmReady.value) return;
   if (map || !mapEl.value) return;
-  if (!window.google?.maps) {
-    try { await loadGoogle(gmApiKey); } catch { return; }
-  }
+  if (!window.google?.maps) return;
+
   map = new window.google.maps.Map(mapEl.value, {
     center: { lat: 43.6532, lng: -79.3832 },
     zoom: 10,
@@ -727,13 +757,13 @@ async function initMapIfNeeded() {
 }
 
 function clearMarkers() {
-  markers.forEach(m => m.setMap(null));
+  markers.forEach(m => m.setMap?.(null));
   markers = [];
 }
 
 async function updateMarkers() {
   await initMapIfNeeded();
-  if (!map || !Array.isArray(list.value)) return;
+  if (!map || !Array.isArray(list.value) || !window.google?.maps) return;
 
   clearMarkers();
   const bounds = new window.google.maps.LatLngBounds();
@@ -777,20 +807,49 @@ async function updateMarkers() {
 }
 /* ======================= */
 
+async function ensureProductionHeader() {
+  // Make sure api helper has x-production-id before first write
+  let pid = localStorage.getItem('currentProductionId') || '';
+  if (!pid && slug.value) {
+    try {
+      const p = await apiGet(`/tenant/productions/${slug.value}`);
+      pid = p?._id || '';
+      if (pid) {
+        localStorage.setItem('currentProductionId', pid);
+        api.setProductionId(pid);
+      }
+    } catch {}
+  } else if (pid) {
+    api.setProductionId(pid);
+  }
+}
+
+// Re-try Google load when tab refocuses (in case adblock/network cleared up)
+function onVisChange() {
+  if (document.visibilityState === 'visible' && !gmReady.value) {
+    retryGoogle();
+  }
+}
+
 onMounted(async () => {
+  await ensureProductionHeader();
+
   try {
     me.value = await apiGet('/auth/me');
   } catch {
     me.value = null;
   }
+
   await load();
   if (gmApiKey) await setupGoogle();
-  else await initMapIfNeeded();
+
+  try { document.addEventListener('visibilitychange', onVisChange); } catch {}
 });
 
-// Re-plot when results change
 watch(list, () => updateMarkers());
 </script>
+
+
 
   
   

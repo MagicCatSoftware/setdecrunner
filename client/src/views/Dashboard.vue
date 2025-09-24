@@ -1,16 +1,13 @@
 <template>
   <div>
-    <NavBar :me="me" @logout="logout" />
+    <NavBar :me="me" />
 
     <div class="dash container">
       <!-- Welcome / Quick actions -->
       <section class="panel">
         <div class="header-row">
           <h1 class="title">Welcome, {{ me?.name || '—' }}</h1>
-          <span v-if="me?.role" class="chip">{{ me.role }}</span>
-          <span v-if="!me?.siteAuthorized && me?.role!=='admin'" class="warn">
-            Awaiting site authorization
-          </span>
+          
 
           <div class="spacer"></div>
 
@@ -89,7 +86,7 @@
 
             <div class="item__main">
               <div class="item__title">
-                <RouterLink class="link" :to="'/runsheets/'+r._id">{{ r.title || 'Untitled' }}</RouterLink>
+                <RouterLink class="link" :to="'/tenant/runsheets/'+r._id">{{ r.title || 'Untitled' }}</RouterLink>
                 <span class="badge">{{ r.status }}</span>
               </div>
               <div class="meta">
@@ -100,7 +97,7 @@
             </div>
 
             <div class="item__actions">
-              <RouterLink class="btn" :to="'/runsheets/'+r._id">Open</RouterLink>
+              <RouterLink class="btn" :to="'/tenant/runsheets/'+r._id">Open</RouterLink>
               <button
                 v-if="r.status==='open' && !r.assignedTo"
                 class="btn"
@@ -348,7 +345,6 @@ const initMap = async () => {
 };
 
 /* ----------------------- Dashboard core ----------------------- */
-const logout = () => auth.logout();
 
 const shortDate = (d) => {
   if (!d) return '—';

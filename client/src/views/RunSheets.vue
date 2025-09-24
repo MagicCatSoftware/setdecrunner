@@ -244,12 +244,20 @@ const statuses = ['draft','open','assigned','claimed','in_progress','completed',
 const productionId = ref(localStorage.getItem('currentProductionId') || '');
 
 async function ensureProductionId() {
-  if (productionId.value) return productionId.value;
+  if (productionId.value) {
+    // make sure api helper is in sync (header)
+    api.setProductionId(productionId.value);
+    return productionId.value;
+  }
   if (!slug.value) return '';
   try {
     const prod = await apiGet(`/productions/by-slug/${slug.value}`);
     productionId.value = prod?._id || '';
-    if (productionId.value) localStorage.setItem('currentProductionId', productionId.value);
+    if (productionId.value) {
+      localStorage.setItem('currentProductionId', productionId.value);
+      // IMPORTANT: keep API helper header in sync
+      api.setProductionId(productionId.value);
+    }
   } catch {
     // swallow; UI will surface other errors if needed
   }
@@ -441,10 +449,9 @@ const assign = async (r) => {
   busyId.value = r._id;
   try {
     const updated = await api.post(`/tenant/runsheets/${r._id}/assign`, { userId: selectedUserId.value });
-    // update in list
     const idx = list.value.findIndex(x => x._id === r._id);
     if (idx !== -1) list.value[idx] = { ...list.value[idx], ...updated };
-    toggleAssign(); // close panel
+    toggleAssign();
   } catch (e) {
     assignError.value = e?.body?.error || e?.message || 'Failed to assign';
   } finally {
@@ -479,7 +486,6 @@ const setStatus = async (r, status) => {
 };
 
 const canShowAssign = (r) => {
-  // Show Assign if unassigned or reassign if assigned; admins only
   return isAdmin.value && ['open','assigned','claimed','in_progress'].includes(r.status);
 };
 
@@ -506,7 +512,8 @@ const del = async (r) => {
   if (!confirm('Delete this runsheet?')) return;
   busyId.value = r._id;
   try {
-    await api.delete(`/tenant/runsheets/${r._id}`);
+    // FIX: use api.del (your helper does not export api.delete)
+    await api.del(`/tenant/runsheets/${r._id}`);
     list.value = list.value.filter(x => x._id !== r._id);
   } catch (e) {
     error.value = e?.body?.error || e?.message || 'Failed to delete';
@@ -561,6 +568,7 @@ onMounted(async () => {
   await load();
 });
 </script>
+
 
 <style scoped>
 :root{
