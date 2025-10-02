@@ -30,7 +30,7 @@ function getProdIdOrThrow(req) {
 
 async function getProductionOrThrow(prodId) {
   const prod = await Production.findById(prodId)
-    .select('_id name slug owner ownerUserId members')
+    .select('_id name title slug owner ownerUserId members')
     .lean();
   if (!prod) {
     const err = new Error(`Unknown production id: ${prodId}`);
@@ -73,7 +73,7 @@ router.get(
   '/users',
   authRequired,
   requireMembership,
-  async (req, res, next) => {
+  async (req, res) => {
     try {
       const prodId = getProdIdOrThrow(req);
       const prod = await assertAdminForProduction(req, prodId);
@@ -115,7 +115,7 @@ router.post(
   authRequired,
   requireMembership,
   requireRole('admin'),
-  async (req, res, next) => {
+  async (req, res) => {
     try {
       const prodId = getProdIdOrThrow(req);
       const prod = await assertAdminForProduction(req, prodId);
@@ -185,30 +185,44 @@ router.post(
       const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
       user.resetTokenHash = tokenHash;
       user.resetExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
       await user.save();
 
-      const link = `${CLIENT_BASE}/set-password?token=${encodeURIComponent(rawToken)}`;
+      // Build invite link WITH production slug + post-reset redirect
+      const slug = String(prod.slug || '').trim();
+      const rAfter = slug ? `/${encodeURIComponent(slug)}/login` : '/login';
+      const link = `${CLIENT_BASE}/set-password?token=${encodeURIComponent(rawToken)}${
+        slug ? `&slug=${encodeURIComponent(slug)}` : ''
+      }&r=${encodeURIComponent(rAfter)}`;
 
       try {
         await mailer.sendMail({
           to: user.email,
           from: process.env.MAIL_FROM || process.env.MAIL_USER,
-          subject: 'You have been invited to Set-Dec Runner',
+          subject: `You're invited to ${prod.name || prod.title || 'Set-Dec Runner'}`,
           text: `Hi ${displayName || ''},
 
-You've been granted access to ${prod.name || 'Set-Dec Runner'}.
+You've been granted access to ${prod.name || prod.title || 'Set-Dec Runner'}${slug ? ` (/${slug})` : ''}.
 Click the link below to set your password:
 ${link}
 
+After setting your password, you'll be taken to the login page for this production.
 This link expires in 24 hours.`,
           html: `
-            <div style="font-family:Arial,sans-serif">
+            <div style="font-family:Arial,sans-serif;line-height:1.5">
               <p>Hi ${displayName || ''},</p>
-              <p>You've been granted access to <b>${prod.name || 'Set-Dec Runner'}</b>.</p>
-              <p><a href="${link}" style="background:#111;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;">Set your password</a></p>
-              <p>If the button doesn't work, copy & paste this link:<br>${link}</p>
-              <p>This link expires in 24 hours.</p>
+              <p>You've been granted access to <b>${prod.name || prod.title || 'Set-Dec Runner'}</b>${
+                slug ? ` (<code>/${slug}</code>)` : ''
+              }.</p>
+              <p>
+                <a href="${link}" style="background:#111;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;display:inline-block">
+                  Set your password
+                </a>
+              </p>
+              <p>If the button doesn't work, copy &amp; paste this link:<br>
+                <a href="${link}">${link}</a>
+              </p>
+              <p>After setting your password, you'll be taken to the login page for this production.</p>
+              <p><i>This link expires in 24 hours.</i></p>
             </div>
           `,
         });
@@ -217,7 +231,7 @@ This link expires in 24 hours.`,
         console.warn('[adminUsers] Invite link (copy manually):', link);
       }
 
-      res.json({ ok: true, userId: user._id, productionId: String(prodId) });
+      res.json({ ok: true, userId: user._id, productionId: String(prodId), slug });
     } catch (e) {
       const code = e.status || 500;
       if (code >= 500) console.error('[POST /tenant/admin/users]', e);
@@ -235,7 +249,7 @@ router.patch(
   authRequired,
   requireMembership,
   requireRole('admin'),
-  async (req, res, next) => {
+  async (req, res) => {
     try {
       const prodId = getProdIdOrThrow(req);
       await assertAdminForProduction(req, prodId);
@@ -263,7 +277,6 @@ router.patch(
         if (!allowedRoles.has(newRole)) {
           return res.status(400).json({ error: 'Invalid role' });
         }
-        // Update if exists; otherwise add membership + ensure user.productionIds
         const upd = await Production.updateOne(
           { _id: prodId, 'members.user': target._id },
           { $set: { 'members.$.role': newRole } }
@@ -307,7 +320,7 @@ router.delete(
   authRequired,
   requireMembership,
   requireRole('admin'),
-  async (req, res, next) => {
+  async (req, res) => {
     try {
       const prodId = getProdIdOrThrow(req);
       await assertAdminForProduction(req, prodId);
@@ -339,3 +352,4 @@ router.delete(
 );
 
 export default router;
+

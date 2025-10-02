@@ -1,5 +1,5 @@
 <template>
-
+<PublicNav/>
   <div class="login">
     <div class="login__card">
       <h2 class="login__title">Set your password</h2>
@@ -24,6 +24,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import api from '../api.js';
+import PublicNav from '../components/PublicNav.vue';
 
 const router = useRouter();
 const route  = useRoute();
