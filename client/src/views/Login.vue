@@ -61,9 +61,40 @@
       <div class="divider">or</div>
 
       <div class="buttons">
-        <a :href="googleUrl" class="btn btn--oauth">Continue with Google</a>
-        <a :href="facebookUrl" class="btn btn--oauth">Continue with Facebook</a>
-      </div>
+  <!-- Google -->
+  <a
+    :href="googleUrl"
+    class="oauth-btn oauth-btn--google"
+    aria-label="Continue with Google"
+  >
+    <span class="oauth-btn__logo">
+      <!-- Official 4-color “G” (inline SVG, no external asset needed) -->
+      <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+        <path fill="#4285F4" d="M17.64 9.2045c0-.638-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.797 2.717v2.258h2.908C16.661 13.254 17.64 11.004 17.64 9.2045z"/>
+        <path fill="#34A853" d="M9 18c2.43 0 4.464-.806 5.952-2.18l-2.908-2.258c-.806.54-1.837.86-3.044.86-2.341 0-4.324-1.58-5.03-3.704H.94v2.332C2.422 15.983 5.481 18 9 18z"/>
+        <path fill="#FBBC05" d="M3.97 10.718a5.411 5.411 0 0 1 0-3.436V4.95H.94a8.996 8.996 0 0 0 0 8.1l3.03-2.332z"/>
+        <path fill="#EA4335" d="M9 3.58c1.319 0 2.507.453 3.439 1.343l2.58-2.58C13.46.89 11.43 0 9 0 5.481 0 2.422 2.017.94 4.95l3.03 2.332C4.676 5.158 6.659 3.58 9 3.58z"/>
+      </svg>
+    </span>
+    <span class="oauth-btn__label">Continue with Google</span>
+  </a>
+
+  <!-- Facebook -->
+  <a
+    :href="facebookUrl"
+    class="oauth-btn oauth-btn--facebook"
+    aria-label="Continue with Facebook"
+  >
+    <span class="oauth-btn__logo">
+      <!-- Facebook “f” in blue box (brand blue) -->
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <rect width="24" height="24" rx="4" fill="#1877F2"/>
+        <path fill="#fff" d="M15.33 13.5l.39-2.55h-2.43V9.18c0-.7.34-1.38 1.45-1.38h1.12V5.61s-1.02-.17-1.99-.17c-2.04 0-3.37 1.24-3.37 3.49v2.02H8.3v2.55h2.2V19h2.79v-5.5h2.04z"/>
+      </svg>
+    </span>
+    <span class="oauth-btn__label">Continue with Facebook</span>
+  </a>
+</div>
 
       <p v-if="error" class="error">{{ error }}</p>
 
@@ -125,7 +156,7 @@ async function signIn() {
       slug: slug.value,
     });
 
-    console.log(slug.value);
+
 
     // Store token in both localStorage and api helper via auth
     auth.setToken(token);
@@ -199,7 +230,69 @@ input:focus { border-color: #666; }
 .btn { padding: 10px 14px; border: none; border-radius: 8px; background: #111; color: #fff; cursor: pointer; }
 .btn[disabled] { opacity: .6; cursor: default; }
 .buttons { display: grid; gap: 10px; margin-top: 10px; }
-.btn--oauth { display: inline-block; text-align: center; background: #2d6cdf; }
+
+/* Base OAuth button */
+.oauth-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 44px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .02s ease-in;
+  user-select: none;
+}
+
+/* Logo container keeps consistent size & alignment */
+.oauth-btn__logo {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+/* Label styling (lets us fine-tune per brand) */
+.oauth-btn__label {
+  font-size: 14px;
+}
+
+/* Focus ring (both brands) */
+.oauth-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(26,115,232,.2);
+}
+
+/* Press feedback */
+.oauth-btn:active {
+  transform: translateY(0.5px);
+}
+
+/* --- Google --- */
+.oauth-btn--google {
+  background: #fff;
+  color: #3c4043;
+  border: 1px solid #dadce0;
+}
+
+.oauth-btn--google:hover {
+  background: #f7f8f8;
+  border-color: #c9cccf;
+}
+
+/* --- Facebook --- */
+.oauth-btn--facebook {
+  background: #1877F2; /* Facebook brand blue */
+  color: #fff;
+  border: 1px solid #1877F2;
+}
+
+.oauth-btn--facebook:hover {
+  background: #166fe0;
+  border-color: #166fe0;
+}
+
 .divider { text-align: center; color: #888; margin: 14px 0; }
 .error { color: #c00; margin-top: 10px; }
 .hint { color:#666; font-size: 0.9rem; margin-top: 6px; }

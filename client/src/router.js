@@ -1,6 +1,7 @@
+// client/src/router.js
 import { createRouter, createWebHistory } from 'vue-router';
-import { apiGet } from './api.js';
-import { logout } from './auth.js';
+import api, { apiGet } from './api.js';
+import { logout as softLogout } from './auth.js';
 
 import ProductPage from './views/ProductPage.vue';
 import ThankYou from './views/ThankYou.vue';
@@ -10,38 +11,44 @@ import Dashboard from './views/Dashboard.vue';
 import SetPassword from './views/SetPassword.vue';
 
 // Lazy views
-const RunSheets        = () => import('./views/RunSheets.vue');
-const RunSheetSingle   = () => import('./views/RunsheetSingle.vue');
-const RunSheetEditor   = () => import('./views/RunSheetEditor.vue');
-const RunSheetsBeta    = () => import('./views/RunSheetsBeta.vue');
-const RunSheetByHand   = () => import('./views/RunsheetByHand.vue');       // canvas/draw page
-const HandWrittenRunsheet = () => import('./views/HandWrittenRunsheet.vue'); // view merged image
+const RunSheets              = () => import('./views/RunSheets.vue');
+const RunSheetSingle         = () => import('./views/RunsheetSingle.vue');
+const RunSheetEditor         = () => import('./views/RunSheetEditor.vue');
+const RunSheetsBeta          = () => import('./views/RunSheetsBeta.vue');
+const RunSheetByHand         = () => import('./views/RunsheetByHand.vue');
+const HandWrittenRunsheet    = () => import('./views/HandWrittenRunsheet.vue');
 
-const Suppliers        = () => import('./views/Suppliers.vue');
-const SupplierEditor   = () => import('./views/SupplierEditor.vue');
+const Suppliers              = () => import('./views/Suppliers.vue');
+const SupplierEditor         = () => import('./views/SupplierEditor.vue');
 
-const People           = () => import('./views/People.vue');
-const PeopleEditor     = () => import('./views/PeopleEditor.vue');
+const People                 = () => import('./views/People.vue');
+const PeopleEditor           = () => import('./views/PeopleEditor.vue');
 
-const SetsList         = () => import('./views/SetsList.vue');
-const SetEditor        = () => import('./views/SetEditor.vue');
+const SetsList               = () => import('./views/SetsList.vue');
+const SetEditor              = () => import('./views/SetEditor.vue');
 
-const Driver           = () => import('./views/Driver.vue');
-const Items            = () => import('./views/Items.vue');
-const Places           = () => import('./views/Places.vue');
-const AdminUsers       = () => import('./views/AdminUsers.vue');
+const Driver                 = () => import('./views/Driver.vue');
+const Items                  = () => import('./views/Items.vue');
+const Places                 = () => import('./views/Places.vue');
+const AdminUsers             = () => import('./views/AdminUsers.vue');
 
 // Productions screens
-const Productions      = () => import('./views/Productions.vue');
-const ProductionEditor = () => import('./views/ProductionEditor.vue');
+const Productions            = () => import('./views/Productions.vue');
+const ProductionEditor       = () => import('./views/ProductionEditor.vue');
 
 // Public
-const Public   = () => import('./views/Public.vue');
-const Pricing  = () => import('./views/Pricing.vue');
-const Features = () => import('./views/Features.vue');
-const FAQ      = () => import('./views/FAQ.vue');
-const Purchase = () => import('./views/Purchase.vue');
+const Public                 = () => import('./views/Public.vue');
+const Pricing                = () => import('./views/Pricing.vue');
+const Features               = () => import('./views/Features.vue');
+const FAQ                    = () => import('./views/FAQ.vue');
+const Purchase               = () => import('./views/Purchase.vue');
 
+// Owner area
+const OwnerLogin             = () => import('./views/OwnerLogin.vue');
+const OwnerDashboard         = () => import('./views/OwnerDashboard.vue');
+const OwnerProductionEditor  = () => import('./views/OwnerProductionEditor.vue');
+
+/* ---------------- auth helpers ---------------- */
 function getToken() {
   const t = localStorage.getItem('token');
   return t && t !== 'undefined' && t !== 'null' ? t : '';
@@ -49,21 +56,23 @@ function getToken() {
 
 function decodeJwtPayload(t) {
   try {
-    const parts = t.split('.');
-    if (parts.length !== 3) return null;
+    const parts = String(t).split('.');
+    if (parts.length !== 3) return null; // opaque/non-JWT
     const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
     return JSON.parse(atob(b64 + pad));
   } catch { return null; }
 }
 
+/** If token is missing => false.
+ *  If token decodes & exp in past => false (and clear).
+ *  If token is opaque or non-expiring => true. */
 function isAuthed() {
   const t = getToken();
   if (!t) return false;
   const payload = decodeJwtPayload(t);
-  if (!payload || (payload.exp && Date.now() >= payload.exp * 1000)) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  if (payload && payload.exp && Date.now() >= payload.exp * 1000) {
+    try { localStorage.removeItem('token'); localStorage.removeItem('user'); } catch {}
     return false;
   }
   return true;
@@ -78,6 +87,47 @@ function userHasProduction(prodId) {
   } catch { return false; }
 }
 
+/* Hard logout that never fails */
+function hardLogout() {
+  try { softLogout?.(); } catch {}
+  try {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('currentProductionId');
+  } catch {}
+  try { api.setProductionId?.(''); } catch {}
+  try { api.setUnauthorizedHandler?.(null); } catch {}
+
+  // Nudge any UI listeners
+  try { window.dispatchEvent(new Event('storage')); } catch {}
+  try { window.dispatchEvent(new Event('focus')); } catch {}
+}
+
+/* Owner/Tenant mode: set the right unauthorized handler each time */
+function enterOwnerMode(router, fullPath) {
+  try { api.setProductionId?.(''); } catch {}
+  try {
+    api.setUnauthorizedHandler?.(() => {
+      router.replace({ name: 'owner-login', query: { r: fullPath }, replace: true });
+    });
+  } catch {}
+}
+function enterTenantMode(router, slug, fullPath) {
+  try {
+    api.setUnauthorizedHandler?.(() => {
+      router.replace({ name: 'tenant-login', params: { slug }, query: { r: fullPath }, replace: true });
+    });
+  } catch {}
+}
+
+/* Helper: persist token from OAuth handoff and notify app/navs */
+function setTokenAndNotify(token) {
+  try { localStorage.setItem('token', token); } catch {}
+  try { window.dispatchEvent(new Event('storage')); } catch {}
+  try { window.dispatchEvent(new Event('focus')); } catch {}
+}
+
+/* ---------------- router ---------------- */
 const router = createRouter({
   history: createWebHistory(),
   scrollBehavior: () => ({ top: 0 }),
@@ -89,11 +139,28 @@ const router = createRouter({
     { path: '/features', name: 'features', component: Features },
     { path: '/FAQ', name: 'FAQ', component: FAQ },
 
+    // ----- Owner area (not tenant-scoped) -----
+    { path: '/owner/login', name: 'owner-login', component: OwnerLogin, meta: { guestOnlyOwner: true, ownerArea: true } },
+    {
+      path: '/owner/logout',
+      name: 'owner-logout',
+      beforeEnter: () => { hardLogout(); return { name: 'owner-login', replace: true }; },
+    },
+    { path: '/owner', name: 'owner-home', component: OwnerDashboard, meta: { requiresAuth: true, ownerArea: true } },
+    {
+      path: '/owner/productions/:id',
+      name: 'owner-production-edit',
+      component: OwnerProductionEditor,
+      props: true,
+      meta: { requiresAuth: true, ownerArea: true },
+    },
+
+    // ----- Global logout (outside tenant) -----
     {
       path: '/logout',
       name: 'root-logout',
       beforeEnter: () => {
-        logout();
+        hardLogout();
         const lastSlug = localStorage.getItem('lastSlug');
         if (lastSlug) return { name: 'tenant-login', params: { slug: lastSlug }, replace: true };
         return { name: 'marketing', replace: true };
@@ -102,6 +169,7 @@ const router = createRouter({
 
     { path: '/set-password', name: 'set-password', component: SetPassword },
 
+    // ----- Tenant area (scoped by :slug) -----
     {
       path: '/:slug',
       component: SlugLayout,
@@ -111,18 +179,14 @@ const router = createRouter({
           const prod = await apiGet(`/productions/by-slug/${encodeURIComponent(slug)}`);
           localStorage.setItem('lastSlug', slug);
           localStorage.setItem('currentProductionId', prod._id);
+          enterTenantMode(router, slug, to.fullPath);
           return true;
         } catch {
           return { path: '/', replace: true };
         }
       },
       children: [
-        {
-          path: 'login',
-          name: 'tenant-login',
-          component: TenantLogin,
-          meta: { guestOnlyTenant: true },
-        },
+        { path: 'login', name: 'tenant-login', component: TenantLogin, meta: { guestOnlyTenant: true } },
         {
           path: '',
           name: 'tenant-home',
@@ -140,9 +204,9 @@ const router = createRouter({
           path: 'logout',
           name: 'tenant-logout',
           beforeEnter: (to) => {
-            logout();
             const slug = String(to.params.slug || '');
-            return { name: 'marketing', params: { slug }, replace: true };
+            hardLogout();
+            return { name: 'tenant-login', params: { slug }, replace: true };
           },
         },
 
@@ -151,16 +215,16 @@ const router = createRouter({
         { path: 'productions/new', name: 'production-new', component: ProductionEditor, meta: { requiresAuth: true } },
         { path: 'productions/:id', name: 'production-edit', component: ProductionEditor, props: true, meta: { requiresAuth: true } },
 
-        // Runsheets (typed/official)
+        // Runsheets
         { path: 'runsheets',            name: 'runsheets',        component: RunSheets,      meta: { requiresAuth: true, requiresMembership: true } },
         { path: 'runsheets/new',        name: 'runsheet-new',     component: RunSheetEditor, meta: { requiresAuth: true, requiresMembership: true } },
         { path: 'runsheets/:id',        name: 'runsheet-edit',    component: RunSheetEditor, props: true, meta: { requiresAuth: true, requiresMembership: true } },
         { path: 'runsheets/:id/beta',   name: 'runsheet-beta',    component: RunSheetsBeta,  props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
-        // ✍️ Draw/write by hand (canvas)
+        // ✍️ Canvas
         { path: 'runsheets/:id/by-hand', name: 'runsheet-by-hand', component: RunSheetByHand, props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
-        // Smart "view" router: decides viewer and redirects accordingly
+        // Smart view
         {
           path: 'runsheetsview/:id',
           name: 'runsheet-view',
@@ -168,12 +232,8 @@ const router = createRouter({
           async beforeEnter(to) {
             try {
               const rs = await apiGet(`/tenant/runsheets/${to.params.id}`);
-              const hand =
-                !!(rs?.ocr?.latest?.image) ||
-                /\(by hand\)/i.test(rs?.title || '');
-              if (hand) {
-                return { name: 'runsheet-handwritten', params: { slug: to.params.slug, id: to.params.id }, replace: true };
-              }
+              const hand = !!(rs?.ocr?.latest?.image) || /\(by hand\)/i.test(rs?.title || '');
+              if (hand) return { name: 'runsheet-handwritten', params: { slug: to.params.slug, id: to.params.id }, replace: true };
               return { name: 'runsheet-view-official', params: { slug: to.params.slug, id: to.params.id }, replace: true };
             } catch {
               return { name: 'runsheet-view-official', params: { slug: to.params.slug, id: to.params.id }, replace: true };
@@ -181,66 +241,33 @@ const router = createRouter({
           },
         },
 
-        // Official/normal viewer
-        {
-          path: 'runsheetsview/:id/official',
-          name: 'runsheet-view-official',
-          component: RunSheetSingle,
-          props: true,
-          meta: { requiresAuth: true, requiresMembership: true },
-        },
+        // Viewers
+        { path: 'runsheetsview/:id/official',     name: 'runsheet-view-official', component: RunSheetSingle, props: true, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'runsheetsview/:id/handwritten',  name: 'runsheet-handwritten',   component: HandWrittenRunsheet, props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
-        // 📝 Handwritten image viewer
-        {
-          path: 'runsheetsview/:id/handwritten',
-          name: 'runsheet-handwritten',
-          component: HandWrittenRunsheet,
-          props: true,
-          meta: { requiresAuth: true, requiresMembership: true },
-        },
+        // Shortcuts
+        { path: 'runsheetsview/:id/handwritten/edit', redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } }) },
+        { path: 'runsheetsview/:id/edit-hand',        redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } }) },
+        { path: 'runsheets/:id/handwritten',          redirect: (to) => ({ name: 'runsheet-handwritten', params: { slug: to.params.slug, id: to.params.id } }) },
+        { path: 'runsheets/:id/edit-hand',            redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } }) },
 
-        // -------------------------
-        // ✅ NEW: friendly aliases so "Edit Handwriting" works from anywhere
-        // -------------------------
+        // Others
+        { path: 'suppliers',     name: 'suppliers',     component: Suppliers,      meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'suppliers/new', name: 'supplier-new',  component: SupplierEditor, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'suppliers/:id', name: 'supplier-edit', component: SupplierEditor, props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
-        // 1) From the handwritten viewer, /handwritten/edit → the canvas editor
-        { path: 'runsheetsview/:id/handwritten/edit',
-          name: 'runsheet-handwritten-edit',
-          redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } })
-        },
+        { path: 'people',        name: 'people',        component: People,         meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'people/new',    name: 'person-new',    component: PeopleEditor,   meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'people/:id',    name: 'person-edit',   component: PeopleEditor,   props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
-        // 2) Short alias under runsheetsview
-        { path: 'runsheetsview/:id/edit-hand',
-          redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } })
-        },
+        { path: 'sets',          name: 'sets',          component: SetsList,       meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'sets/new',      name: 'set-new',       component: SetEditor,      meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'sets/:id',      name: 'set-edit',      component: SetEditor,      props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
-        // 3) Optional mirror path under /runsheets for viewing the merged image
-        { path: 'runsheets/:id/handwritten',
-          redirect: (to) => ({ name: 'runsheet-handwritten', params: { slug: to.params.slug, id: to.params.id } })
-        },
-
-        // 4) Another short alias to the editor
-        { path: 'runsheets/:id/edit-hand',
-          redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } })
-        },
-
-        // Suppliers, People, Sets, etc
-        { path: 'suppliers',        name: 'suppliers',     component: Suppliers,      meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'suppliers/new',    name: 'supplier-new',  component: SupplierEditor, meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'suppliers/:id',    name: 'supplier-edit', component: SupplierEditor, props: true, meta: { requiresAuth: true, requiresMembership: true } },
-
-        { path: 'people',           name: 'people',        component: People,         meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'people/new',       name: 'person-new',    component: PeopleEditor,   meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'people/:id',       name: 'person-edit',   component: PeopleEditor,   props: true, meta: { requiresAuth: true, requiresMembership: true } },
-
-        { path: 'sets',             name: 'sets',          component: SetsList,       meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'sets/new',         name: 'set-new',       component: SetEditor,      meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'sets/:id',         name: 'set-edit',      component: SetEditor,      props: true, meta: { requiresAuth: true, requiresMembership: true } },
-
-        { path: 'driver',           name: 'driver',        component: Driver,         meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'items',            name: 'items',         component: Items,          meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'places',           name: 'places',        component: Places,         meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'adminusers',       name: 'admin-users',   component: AdminUsers,     meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'driver',        name: 'driver',        component: Driver,         meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'items',         name: 'items',         component: Items,          meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'places',        name: 'places',        component: Places,         meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'adminusers',    name: 'admin-users',   component: AdminUsers,     meta: { requiresAuth: true, requiresMembership: true } },
       ],
     },
 
@@ -248,15 +275,51 @@ const router = createRouter({
   ],
 });
 
-// Global guard: enforce auth & membership per production
+/* ---------------- global guard ---------------- */
 router.beforeEach((to) => {
+  // 0) OAuth handoff catcher: persist ?token=… from ANY route, then go to r=… or a sane default
+  const q = to.query || {};
+  const tokenQ = typeof q.token === 'string' ? q.token : '';
+  if (tokenQ) {
+    setTokenAndNotify(tokenQ);
+
+    const rParam = typeof q.r === 'string' && q.r ? q.r : '';
+    const ownerLike = to.path.startsWith('/owner') || q.owner === '1';
+    const nextPath =
+      rParam ||
+      (ownerLike ? '/owner'
+                 : (to.params?.slug ? `/${String(to.params.slug)}` : '/'));
+
+    const nextQuery = { ...q };
+    delete nextQuery.token;
+    delete nextQuery.r;
+    delete nextQuery.owner;
+
+    return { path: nextPath, query: nextQuery, replace: true };
+  }
+
+  // 1) Owner area guard
+  const isOwnerRoute = to.meta?.ownerArea || to.path.startsWith('/owner');
+  if (isOwnerRoute) {
+    enterOwnerMode(router, to.fullPath);
+
+    if (to.meta?.guestOnlyOwner && isAuthed()) {
+      return { name: 'owner-home', replace: true };
+    }
+    if (to.meta?.requiresAuth && !isAuthed()) {
+      return { name: 'owner-login', query: { r: to.fullPath }, replace: true };
+    }
+    return true;
+  }
+
+  // 2) Tenant area guard
   const isTenant = !!to.params?.slug;
   if (!isTenant) return true;
 
   const slug = String(to.params.slug);
   const prodId = localStorage.getItem('currentProductionId') || '';
 
-  if (to.name === 'tenant-logout') return true;
+  enterTenantMode(router, slug, to.fullPath);
 
   if (to.meta?.guestOnlyTenant) {
     if (isAuthed() && userHasProduction(prodId)) {
@@ -277,6 +340,8 @@ router.beforeEach((to) => {
 });
 
 export default router;
+
+
 
 
 
