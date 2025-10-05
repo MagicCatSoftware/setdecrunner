@@ -4,50 +4,84 @@
 
     <div class="container">
       <!-- Toolbar -->
-      <div class="toolbar">
-        <button class="btn btn--primary" @click="createRS" :disabled="creating">
-          {{ creating ? 'Creating…' : 'New Run Sheet' }}
-        </button>
+      <div class="toolbar card">
+        <div class="toolbar-left">
+          <button class="btn btn--primary" @click="createRS" :disabled="creating">
+            {{ creating ? 'Creating…' : 'New Run Sheet' }}
+          </button>
 
-        <select v-model="statusFilter" class="select">
-          <option value="">All statuses</option>
-          <option v-for="s in statuses" :key="s" :value="s">{{ s }}</option>
-        </select>
+          <button
+            class="btn btn--primary"
+            @click="createRSByHand"
+            :disabled="creatingHand"
+            title="Create a new runsheet and open the handwriting canvas"
+          >
+            {{ creatingHand ? 'Creating…' : '✍️ Runsheet By Hand' }}
+          </button>
 
-        <label class="check">
-          <input type="checkbox" v-model="mine" />
-          <span>Mine</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" v-model="assignedToMe" />
-          <span>Assigned to me</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" v-model="open" />
-          <span>Open pool</span>
-        </label>
+          <!-- Upload Photo Runsheet -->
+          <input
+            ref="fileInput"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            class="hidden"
+            @change="onPhotoPicked"
+          />
+          <button
+            class="btn"
+            :disabled="uploadingPhoto"
+            @click="triggerPhotoPicker"
+            title="Upload a photo of a runsheet to create a new record"
+          >
+            {{ uploadingPhoto ? 'Uploading…' : '📷 Upload Photo Runsheet' }}
+          </button>
+        </div>
 
-        <!-- Type filter -->
-        <select v-model="typeFilter" class="select">
-          <option value="">All types</option>
-          <option value="purchase">Purchase</option>
-          <option value="rental">Rental</option>
-        </select>
+        <div class="toolbar-right">
+          <select v-model="statusFilter" class="select">
+            <option value="">All statuses</option>
+            <option v-for="s in statuses" :key="s" :value="s">{{ s }}</option>
+          </select>
 
-        <input v-model="q" placeholder="Filter by title" class="input input--grow" />
+          <label class="check">
+            <input type="checkbox" v-model="mine" />
+            <span>Mine</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" v-model="assignedToMe" />
+            <span>Assigned to me</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" v-model="open" />
+            <span>Open pool</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" v-model="handOnly" />
+            <span>Handwritten only</span>
+          </label>
 
-        <button class="btn" @click="load" :disabled="loading">
-          {{ loading ? 'Refreshing…' : 'Refresh' }}
-        </button>
+          <select v-model="typeFilter" class="select">
+            <option value="">All types</option>
+            <option value="purchase">Purchase</option>
+            <option value="rental">Rental</option>
+          </select>
 
-        <span class="muted" v-if="lastUpdated">Updated {{ lastUpdated }}</span>
+          <input v-model="q" placeholder="Filter by title" class="input input--grow" />
+
+          <button class="btn" @click="load" :disabled="loading">
+            {{ loading ? 'Refreshing…' : 'Refresh' }}
+          </button>
+
+          <span class="muted" v-if="lastUpdated">Updated {{ lastUpdated }}</span>
+        </div>
       </div>
 
       <!-- Lists -->
       <div v-if="loading" class="muted">Loading…</div>
 
       <div v-else class="list">
-        <div v-for="r in filteredList" :key="r._id" class="card item">
+        <div v-for="r in filteredList" :key="r._id || r.id" class="card item">
           <!-- Left column -->
           <div class="item__left">
             <img
@@ -62,13 +96,27 @@
               <div class="item__title">
                 <RouterLink
                   class="link"
-                  :to="{ name: 'runsheet-view', params: { slug, id: r._id } }"
+                  :to="viewRoute(r)"
                 >
                   {{ r.title || 'Untitled' }}
                 </RouterLink>
+
                 <span class="badge">{{ r.status }}</span>
                 <span v-if="r.purchaseType" class="badge">{{ r.purchaseType }}</span>
+                <span v-if="isHandwritten(r)" class="badge badge--hand">Handwritten</span>
+                <span v-if="ocrStatus(r)==='queued'" class="badge badge--soft">OCR queued</span>
+
+                <!-- Quick inline link to handwriting editor when available -->
+                <RouterLink
+                  v-if="isHandwritten(r)"
+                  class="badge badge--link"
+                  :to="{ name: 'runsheet-by-hand', params: { slug, id: r._id } }"
+                  title="Edit the handwritten runsheet"
+                >
+                  ✍️ Edit Handwriting
+                </RouterLink>
               </div>
+
               <div class="meta">
                 <span>Created: {{ shortDate(r.createdAt) }}</span>
                 <span v-if="r.date"> · For: {{ shortDate(r.date) }}</span>
@@ -82,9 +130,18 @@
           <div class="item__actions">
             <RouterLink
               class="btn"
-              :to="{ name: 'runsheet-view', params: { slug, id: r._id } }"
+              :to="viewRoute(r)"
             >
-              View Official
+              View
+            </RouterLink>
+
+            <RouterLink
+              v-if="isHandwritten(r)"
+              class="btn"
+              :to="{ name: 'runsheet-handwritten', params: { slug, id: r._id } }"
+              title="Open the merged handwritten image"
+            >
+              View Handwritten
             </RouterLink>
 
             <RouterLink
@@ -101,13 +158,24 @@
               Edit Runsheet
             </RouterLink>
 
+            <!-- Smart editor button: edit if handwritten exists, otherwise open canvas to start -->
+            <RouterLink
+              class="btn"
+              :to="{ name: 'runsheet-by-hand', params: { slug, id: r._id } }"
+              :title="isHandwritten(r) ? 'Continue handwriting on canvas' : 'Start handwriting on canvas'"
+            >
+              {{ isHandwritten(r) ? 'Edit Handwriting' : 'Open Canvas' }}
+            </RouterLink>
+
             <!-- Claim (open + unassigned) -->
             <button
               v-if="r.status==='open' && !r.assignedTo"
               class="btn"
               :disabled="busyId===r._id"
               @click="claim(r)"
-            >Claim</button>
+            >
+              Claim
+            </button>
 
             <!-- Start / Complete -->
             <button
@@ -115,14 +183,18 @@
               class="btn"
               :disabled="busyId===r._id"
               @click="setStatus(r,'in_progress')"
-            >Start</button>
+            >
+              Start
+            </button>
 
             <button
               v-if="r.status==='in_progress'"
               class="btn"
               :disabled="busyId===r._id"
               @click="setStatus(r,'completed')"
-            >Complete</button>
+            >
+              Complete
+            </button>
 
             <!-- Admin: Assign / Reassign -->
             <button
@@ -149,7 +221,9 @@
               class="btn btn--danger"
               :disabled="busyId===r._id"
               @click="del(r)"
-            >Delete</button>
+            >
+              Delete
+            </button>
           </div>
 
           <!-- Inline Assign Panel -->
@@ -222,30 +296,36 @@ const router = useRouter();
 
 const slug = computed(() => String(route.params.slug || ''));
 
-/* -------------------- state -------------------- */
+/* state */
 const me = ref(null);
 const list = ref([]);
 const loading = ref(false);
 const error = ref('');
 const creating = ref(false);
+const creatingHand = ref(false);
+const uploadingPhoto = ref(false);
 const busyId = ref('');
 const details = ref({});
 const lastUpdated = ref('');
 
+/* upload input ref */
+const fileInput = ref(null);
+
+/* filters */
 const mine = ref(false);
 const assignedToMe = ref(false);
 const open = ref(false);
+const handOnly = ref(false);
 const statusFilter = ref('');
 const typeFilter = ref('');
 const q = ref('');
 const statuses = ['draft','open','assigned','claimed','in_progress','completed','cancelled'];
 
-/* NEW: ensure we always have a productionId */
+/* production scope */
 const productionId = ref(localStorage.getItem('currentProductionId') || '');
 
 async function ensureProductionId() {
   if (productionId.value) {
-    // make sure api helper is in sync (header)
     api.setProductionId(productionId.value);
     return productionId.value;
   }
@@ -255,17 +335,13 @@ async function ensureProductionId() {
     productionId.value = prod?._id || '';
     if (productionId.value) {
       localStorage.setItem('currentProductionId', productionId.value);
-      // IMPORTANT: keep API helper header in sync
       api.setProductionId(productionId.value);
     }
-  } catch {
-    // swallow; UI will surface other errors if needed
-  }
+  } catch {}
   return productionId.value;
 }
 
-/* -------------------- helpers -------------------- */
-
+/* helpers */
 const isAdmin = computed(() => me.value?.role === 'admin' || me.value?.isAdmin === true);
 const stamp = () => { lastUpdated.value = new Date().toLocaleTimeString(); };
 
@@ -277,7 +353,7 @@ const paramsForLoad = () => {
   if (statusFilter.value) params.status = statusFilter.value;
   if (typeFilter.value) params.purchaseType = typeFilter.value;
   if (q.value.trim()) params.q = q.value.trim();
-  if (productionId.value) params.productionId = productionId.value; // scope to production
+  if (productionId.value) params.productionId = productionId.value;
   return params;
 };
 
@@ -286,7 +362,7 @@ const qs = (obj = {}) => {
   return s ? `?${s}` : '';
 };
 
-/* -------------------- api actions -------------------- */
+/* api actions */
 const load = async () => {
   loading.value = true; error.value = '';
   try {
@@ -302,44 +378,42 @@ const load = async () => {
   }
 };
 
-/* ------------ images helpers ------------- */
-const rawApiBase = (import.meta.env.VITE_API_BASE || 'http://localhost:4000/api').replace(/\/+$/, '');
-const apiOrigin  = rawApiBase.replace(/\/api\/?$/, '') || window.location.origin;
+/* images + thumbnails */
+const apiBase = (import.meta.env.VITE_API_BASE || `${window.location.origin}/api`).replace(/\/+$/,'');
 
 const PLACEHOLDER_IMG =
   'data:image/svg+xml;charset=utf-8,' +
   encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
-      <rect width="100%" height="100%" fill="#f2f2f2"/>
-      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
-            font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
-            font-size="14" fill="#999">No Image</text>
-    </svg>`
+    '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="14" fill="#999">No Image</text></svg>'
   );
 
 function normalizeImg(src) {
   if (!src) return '';
   let s = String(src).trim();
 
-  if (/^(?:https?:)?\/\//i.test(s) || s.startsWith('data:')) {
-    if (s.startsWith('//')) return `https:${s}`;
+  if (s.startsWith('data:')) return s;
+
+  if (/^(?:https?:)?\/\//i.test(s) || s.startsWith('//')) {
+    if (s.startsWith('//')) s = `https:${s}`;
     if (location.protocol === 'https:' && s.startsWith('http:')) {
       s = s.replace(/^http:/i, 'https:');
     }
-    return s;
+    try {
+      const u = new URL(s);
+      const path = u.pathname || '';
+      const tail = `${path}${u.search || ''}${u.hash || ''}`;
+      if (path.startsWith('/api/uploads/')) return `${u.origin}${tail}`;
+      if (path.startsWith('/uploads/')) return `${u.origin}/api${tail}`;
+      return `${u.origin}${tail}`;
+    } catch {}
   }
 
   s = s.replace(/\\/g, '/');
-
-  const idx = s.indexOf('/uploads/');
-  if (idx !== -1) s = s.slice(idx);
-
   if (!s.startsWith('/')) s = `/${s}`;
-  if (!s.startsWith('/uploads/')) {
-    s = s.replace(/^\/+/, '');
-    s = `/uploads/${s}`;
-  }
-  return `${window.location.origin}${s}`;
+  if (s.startsWith('/api/uploads/')) return `${window.location.origin}${s}`;
+  if (s.startsWith('/uploads/')) return `${apiBase}${s}`;
+  if (s.startsWith('/api/')) return `${window.location.origin}${s}`;
+  return `${apiBase}${s}`;
 }
 
 function pickFirstImage(obj) {
@@ -354,7 +428,19 @@ function pickFirstImage(obj) {
   return '';
 }
 
+function isHandwritten(r) {
+  return !!(r && r.ocr && r.ocr.latest && r.ocr.latest.image);
+}
+
+function ocrStatus(r) {
+  return r?.ocr?.latest?.meta?.status || '';
+}
+
 function thumbFor(r) {
+  if (isHandwritten(r)) {
+    const url = normalizeImg(r.ocr.latest.image);
+    return url || PLACEHOLDER_IMG;
+  }
   const raw = pickFirstImage(r);
   if (!raw) return PLACEHOLDER_IMG;
   const url = normalizeImg(raw);
@@ -368,7 +454,7 @@ function onImgError(e) {
   img.src = PLACEHOLDER_IMG;
 }
 
-/* ------------ create ------------ */
+/* create */
 const createRS = async () => {
   creating.value = true; error.value = '';
   try {
@@ -378,7 +464,7 @@ const createRS = async () => {
     const rs = await api.post('/tenant/runsheets', {
       title: 'Untitled',
       status: 'draft',
-      productionId: pid,
+      productionId: pid
     });
 
     router.push({ name: 'runsheet-edit', params: { slug: slug.value, id: rs._id } });
@@ -389,18 +475,85 @@ const createRS = async () => {
   }
 };
 
-/* ------------ item/detail helpers ------------ */
+const createRSByHand = async () => {
+  creatingHand.value = true; error.value = '';
+  try {
+    const pid = await ensureProductionId();
+    if (!pid) throw new Error('No production selected');
+
+    const rs = await api.post('/tenant/runsheets', {
+      title: 'Untitled (By Hand)',
+      status: 'draft',
+      productionId: pid
+    });
+
+    router.push({ name: 'runsheet-by-hand', params: { slug: slug.value, id: rs._id } });
+  } catch (e) {
+    error.value = e?.body?.error || e?.message || 'Failed to create runsheet for By Hand';
+  } finally {
+    creatingHand.value = false;
+  }
+};
+
+/* photo upload -> create new runsheet -> upload image -> go to handwritten view */
+function triggerPhotoPicker() {
+  fileInput.value?.click();
+}
+
+async function onPhotoPicked(ev) {
+  const file = ev?.target?.files?.[0];
+  ev.target.value = '';
+  if (!file) return;
+
+  if (!/image\/(png|jpeg|jpg|webp)/i.test(file.type)) {
+    error.value = 'Please choose a PNG, JPEG, or WEBP image.';
+    return;
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    error.value = 'Image is larger than 20 MB. Please choose a smaller file.';
+    return;
+  }
+
+  uploadingPhoto.value = true;
+  error.value = '';
+
+  try {
+    const pid = await ensureProductionId();
+    if (!pid) throw new Error('No production selected');
+
+    const niceTitle = `Photo Upload ${new Date().toLocaleString()}`;
+    const rs = await api.post('/tenant/runsheets', {
+      title: niceTitle,
+      status: 'draft',
+      productionId: pid
+    });
+
+    const fd = new FormData();
+    fd.append('file', file, file.name || 'runsheet.jpg');
+    fd.append('runsheetId', rs._id);
+
+    await api.post('/tenant/ocr/runsheet', fd, { multipart: true });
+
+    await load();
+
+    router.push({ name: 'runsheet-handwritten', params: { slug: slug.value, id: rs._id } });
+  } catch (e) {
+    error.value = e?.body?.error || e?.message || 'Failed to upload photo runsheet';
+  } finally {
+    uploadingPhoto.value = false;
+  }
+}
+
+/* item/detail helpers */
 const ensureDetails = async (r) => {
   if (details.value[r._id]) return;
   try {
     const full = await api.get(`/tenant/runsheets/${r._id}`);
     details.value = { ...details.value, [r._id]: full };
-  } catch (e) {
-    // ignore; preview is optional
-  }
+  } catch {}
 };
 
-/* ------------ assignment + status actions ------------ */
+/* assignment + status actions */
 const assignOpenId = ref('');
 const users = ref([]);
 const userQuery = ref('');
@@ -437,8 +590,8 @@ const toggleAssign = (r = null) => {
 
 const fetchUsers = async () => {
   try {
-    const q = userQuery.value?.trim() || '';
-    users.value = await api.get(`/users${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+    const term = userQuery.value?.trim() || '';
+    users.value = await api.get(`/users${term ? `?q=${encodeURIComponent(term)}` : ''}`);
   } catch (e) {
     assignError.value = e?.body?.error || e?.message || 'Failed to search users';
   }
@@ -512,7 +665,6 @@ const del = async (r) => {
   if (!confirm('Delete this runsheet?')) return;
   busyId.value = r._id;
   try {
-    // FIX: use api.del (your helper does not export api.delete)
     await api.del(`/tenant/runsheets/${r._id}`);
     list.value = list.value.filter(x => x._id !== r._id);
   } catch (e) {
@@ -522,7 +674,7 @@ const del = async (r) => {
   }
 };
 
-/* ------------ filters: local + server sync ------------ */
+/* computed + routing */
 const filteredList = computed(() => {
   const term = q.value.trim().toLowerCase();
   const wantMine = !!mine.value;
@@ -530,6 +682,7 @@ const filteredList = computed(() => {
   const wantOpen = !!open.value;
   const wantStatus = statusFilter.value;
   const wantType = typeFilter.value;
+  const wantHand = !!handOnly.value;
   const myId = me.value?._id || '';
 
   return (list.value || []).filter((r) => {
@@ -540,34 +693,53 @@ const filteredList = computed(() => {
     const mineOk = !wantMine || ((r.createdBy?._id || r.createdBy) === myId);
     const assignedOk = !wantAssignedToMe || ((r.assignedTo?._id || r.assignedTo) === myId);
     const openOk = !wantOpen || (r.status === 'open' && !r.assignedTo);
+    const handOk = !wantHand || isHandwritten(r);
 
-    return titleOk && typeOk && statusOk && mineOk && assignedOk && openOk;
+    return titleOk && typeOk && statusOk && mineOk && assignedOk && openOk && handOk;
   });
 });
 
-/* ------------ watch filters -> reload (debounced) ------------ */
+function viewRoute(r) {
+  if (isHandwritten(r)) {
+    return { name: 'runsheet-handwritten', params: { slug: slug.value, id: r._id } };
+  }
+  return { name: 'runsheet-view', params: { slug: slug.value, id: r._id } };
+}
+
+/* watch filters -> reload (debounced) */
 let loadTimer;
 const scheduleLoad = (delay = 250) => {
   clearTimeout(loadTimer);
   loadTimer = setTimeout(load, delay);
 };
 
-watch([statusFilter, typeFilter, mine, assignedToMe, open], () => scheduleLoad(0));
+watch([statusFilter, typeFilter, mine, assignedToMe, open, handOnly], () => scheduleLoad(0));
 watch(q, () => scheduleLoad(300));
 
-/* ------------ utils ------------ */
+/* utils */
 const shortDate = (d) => {
   if (!d) return '—';
   try { return new Date(d).toLocaleDateString(); } catch { return '—'; }
 };
 
-/* ------------ boot ------------ */
+/* boot */
 onMounted(async () => {
   try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
   await ensureProductionId();
   await load();
 });
 </script>
+
+<style scoped>
+.badge--link {
+  cursor: pointer;
+  text-decoration: none;
+  border: 1px dashed currentColor;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.4rem;
+}
+.hidden { display: none; }
+</style>
 
 
 <style scoped>

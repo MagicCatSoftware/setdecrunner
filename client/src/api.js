@@ -1,15 +1,17 @@
 // client/src/api.js
 
-// Optional helper: access the auth store without creating a hard import cycle.
-// Usage (async): const auth = await getAuth(); auth.setToken(...), auth.setProductionId(...);
 // Optional helper: access the auth store without a hard import cycle.
 export async function getAuth() {
   const mod = await import('./auth.js');
   return mod.useAuth();
 }
 
-// ⚠️ Base WITHOUT /tenant — put /tenant in the path you pass in.
-const API_BASE = (import.meta.env.VITE_API_BASE || 'https//set-dec.com/api').replace(/\/+$/, '');
+// Base URL WITHOUT /tenant — pass /tenant in the path you call.
+// Prefer env; fall back to a sane relative /api (fixes typos like "https//...").
+const RAW_BASE = (import.meta.env.VITE_API_BASE || '/api').trim();
+const API_BASE = RAW_BASE
+  .replace(/^https(?=\/\/)/i, 'https:') // fix missing colon typo "https//"
+  .replace(/\/+$/, '');
 
 // ---------------------------------------------------------------------------
 // Internal state (mirrors localStorage; synced across tabs)
@@ -38,11 +40,9 @@ try {
   });
 } catch {}
 
-// Immediately persist pid from OAuth callback if present
+// Immediately persist pid from URL if present
 if (_prodId) safeWrite('currentProductionId', _prodId);
 
-// ---------------------------------------------------------------------------
-// Public setters – call after login and after you know the pid
 // ---------------------------------------------------------------------------
 export function setToken(t) {
   _token = t || '';
@@ -63,28 +63,34 @@ function buildUrl(path, params) {
   const base = path.startsWith('http')
     ? path
     : `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
-  if (!params || Object.keys(params).length === 0) return base;
 
-  // Build relative to API_BASE origin to avoid oddities
-  const url = new URL(base, API_BASE);
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null) continue;
-    url.searchParams.set(k, String(v));
+  // Append querystring without requiring absolute base
+  if (params && Object.keys(params).length) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null) continue;
+      qs.set(k, String(v));
+    }
+    return `${base}${base.includes('?') ? '&' : '?'}${qs.toString()}`;
   }
-  return url.toString();
+  return base;
 }
 
 function buildHeaders(extra = {}, { isForm = false, hasBody = false } = {}) {
   const h = { Accept: 'application/json', ...(extra || {}) };
 
-  // Only set Content-Type for actual JSON bodies
+  // Only set Content-Type for JSON bodies (FormData sets its own)
   if (hasBody && !isForm && !('Content-Type' in h)) {
     h['Content-Type'] = 'application/json';
   }
 
   if (_token && !('Authorization' in h)) h.Authorization = `Bearer ${_token}`;
-  if (_prodId && !('x-production-id' in h)) h['x-production-id'] = _prodId;
-
+  // Be generous with header casing
+  if (_prodId) {
+    if (!('x-production-id' in h) && !('X-Production-Id' in h)) {
+      h['X-Production-Id'] = _prodId;
+    }
+  }
   return h;
 }
 
@@ -106,14 +112,15 @@ export async function apiFetch(method, path, { params, body, headers } = {}) {
     res = await fetch(url, {
       method,
       mode: 'cors',
-      credentials: 'omit', // set to 'include' if you use cookies
-      headers: buildHeaders({ ...(headers || {}), ...(alreadyRetried ? { 'x-api-retried': '1' } : {}) }, { isForm, hasBody: sendBody }),
+      credentials: 'omit', // switch to 'include' if you use cookies
+      headers: buildHeaders(
+        { ...(headers || {}), ...(alreadyRetried ? { 'x-api-retried': '1' } : {}) },
+        { isForm, hasBody: sendBody }
+      ),
       body: isForm ? body : (sendBody ? JSON.stringify(body) : undefined),
     });
   } catch (netErr) {
-    const err = new Error(
-      `Network error calling ${method.toUpperCase()} ${url}. ${netErr?.message || netErr}`
-    );
+    const err = new Error(`Network error calling ${method.toUpperCase()} ${url}. ${netErr?.message || netErr}`);
     err.status = 0;
     err.cause = netErr;
     throw err;
@@ -131,11 +138,10 @@ export async function apiFetch(method, path, { params, body, headers } = {}) {
   } catch { data = null; }
 
   if (!res.ok) {
-    // If we got a 400 and it *looks like* a missing/invalid production id, attempt to resolve via slug and retry ONCE
+    // If we got a 400 and it *looks like* a missing/invalid production id, try to recover via slug and retry ONCE
     if (res.status === 400 && !alreadyRetried && shouldAttemptPidRecovery(data)) {
       const recovered = await tryRecoverPidFromSlug();
       if (recovered) {
-        // retry the original request once with a marker to avoid loops
         return apiFetch(method, path, {
           params,
           body,
@@ -181,7 +187,7 @@ function shouldAttemptPidRecovery(data) {
   );
 }
 
-// Try to recover pid by reading ?pid=… or resolving by /:slug → GET /tenant/productions/:slug
+// Try to recover pid by reading ?pid=… or resolving by slug → GET /productions/by-slug/:slug
 async function tryRecoverPidFromSlug() {
   // 1) Query param wins
   const pid = pickPidFromQuery();
@@ -198,14 +204,14 @@ async function tryRecoverPidFromSlug() {
   } catch {}
   if (!slug) return false;
 
-  // 3) Resolve pid using a direct fetch that does NOT require x-production-id
+  // 3) Resolve pid using an endpoint that does NOT require x-production-id
   try {
-    const url = buildUrl(`/tenant/productions/${encodeURIComponent(slug)}`);
+    const url = buildUrl(`/productions/by-slug/${encodeURIComponent(slug)}`);
     const res = await fetch(url, {
       method: 'GET',
       mode: 'cors',
       credentials: 'omit',
-      headers: buildHeaders({}, { isForm: false, hasBody: false }), // adds token if present, NO x-production-id
+      headers: buildHeaders({}, { isForm: false, hasBody: false }),
     });
     if (!res.ok) return false;
     const p = await res.json().catch(() => null);
@@ -235,8 +241,10 @@ export function apiGet(path, params, options = {}) {
   return apiFetch('GET', path, { params, ...(options || {}) });
 }
 export function apiPost(path, body, options = {}) {
-  
   return apiFetch('POST', path, { body, ...(options || {}) });
+}
+export function apiPut(path, body, options = {}) {
+  return apiFetch('PUT', path, { body, ...(options || {}) });
 }
 export function apiPatch(path, body, options = {}) {
   return apiFetch('PATCH', path, { body, ...(options || {}) });
@@ -256,6 +264,7 @@ export function apiDel(path, bodyOrParams, options = {}) {
 // Axios-like names (if you use api.get('/path', { params, headers }))
 function get(path, options = {}) { return apiFetch('GET', path, options); }
 function post(path, body, options = {}) { return apiFetch('POST', path, { body, ...(options || {}) }); }
+function put(path, body, options = {}) { return apiFetch('PUT', path, { body, ...(options || {}) }); }
 function patch(path, body, options = {}) { return apiFetch('PATCH', path, { body, ...(options || {}) }); }
 function del(path, options = {}) { return apiFetch('DELETE', path, options); }
 
@@ -267,7 +276,7 @@ const api = {
   setUnauthorizedHandler,
   // methods
   fetch: apiFetch,
-  get, post, patch, del,
+  get, post, put, patch, del,
   // utils
   buildUrl,
 };

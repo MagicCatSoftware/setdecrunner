@@ -1,4 +1,4 @@
-// server/models/Runsheet.js
+// server/models/RunSheet.js
 import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
@@ -37,9 +37,33 @@ const RunAttachSchema = new Schema({
   photos:   { type: [String], default: [] },
 }, { _id: true });
 
+/* --------------------------- NEW: By-Hand Ink ---------------------------- */
+/* We store normalized strokes so they re-render nicely on any device.
+   Each point is in [0..1] relative to the canvas (natural) width/height.
+*/
+const HandPointSchema = new Schema({
+  x: { type: Number, min: 0, max: 1, required: true },
+  y: { type: Number, min: 0, max: 1, required: true },
+}, { _id: false });
+
+const HandStrokeSchema = new Schema({
+  tool:   { type: String, enum: ['pen','eraser'], default: 'pen' },
+  color:  { type: String, default: '#000000' },
+  size:   { type: Number, default: 4 }, // pixels at natural resolution
+  points: { type: [HandPointSchema], default: [] },
+}, { _id: true });
+
+const HandDataSchema = new Schema({
+  baseWidth:   { type: Number, default: 0 },   // natural bg width used when recording
+  baseHeight:  { type: Number, default: 0 },   // natural bg height used when recording
+  strokes:     { type: [HandStrokeSchema], default: [] },
+  lastSavedAt: { type: Date, default: null },
+  lastSavedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+}, { _id: false });
+
 /* --------------------------- Main Runsheet Schema ------------------------ */
 const RunsheetSchema = new Schema({
-  // 🔹 Scope each runsheet to a production (tenant)
+  // Scope each runsheet to a production (tenant)
   productionId: { type: Schema.Types.ObjectId, ref: 'Production', required: true, index: true },
 
   title:  { type: String, trim: true, default: 'Untitled' },
@@ -62,7 +86,7 @@ const RunsheetSchema = new Schema({
   // Run
   stops:  { type: [StopSchema],     default: [] },
 
-  // NEW: runsheet-level items (attached to runsheet, not a stop)
+  // runsheet-level items (attached to runsheet, not a stop)
   items:  { type: [RunAttachSchema], default: [] },
 
   // Type
@@ -117,6 +141,16 @@ const RunsheetSchema = new Schema({
 
   // Canonical list of Item IDs used anywhere on this runsheet
   itemsIndex: { type: [{ type: Schema.Types.ObjectId, ref: 'Item' }], default: [] },
+
+  // NEW: by-hand ink data (vector strokes)
+  hand: { type: HandDataSchema, default: () => ({}) },
+
+  // OCR bucket
+  ocr: {
+    latest:    { type: Schema.Types.Mixed, default: null },
+    history:   { type: [Schema.Types.Mixed], default: [] },
+    searchText:{ type: String, default: '' },
+  },
 }, { timestamps: true });
 
 /* ------------------------------ Indexes ---------------------------------- */
@@ -131,12 +165,9 @@ RunsheetSchema.index({ productionId: 1, itemsIndex: 1 });
 /* --------------------------- Helpers / Hooks ------------------------------ */
 function collectItemIds(rsDoc) {
   const set = new Set();
-
-  // runsheet-level
   for (const ri of rsDoc.items || []) {
     if (ri?.item) set.add(String(ri.item));
   }
-  // per-stop legacy
   for (const stop of rsDoc.stops || []) {
     for (const ri of stop.items || []) {
       if (ri?.item) set.add(String(ri.item));
@@ -167,6 +198,8 @@ RunsheetSchema.query.byProduction = function (prodId) {
 };
 
 export default mongoose.model('Runsheet', RunsheetSchema);
+
+
 
 
 

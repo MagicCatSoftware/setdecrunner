@@ -44,10 +44,10 @@
         <div class="row addr-supplier">
           <!-- Production company block -->
           <div class="panel addr">
-  <div class="addr-line strong">{{ companyBlock.name }}</div>
-  <div class="addr-line" v-if="companyBlock.showTitle">"{{ companyBlock.title }}"</div>
-  <div class="addr-line" v-if="companyBlock.address">{{ companyBlock.address }}</div>
-  <div class="addr-line" v-if="companyBlock.phone">{{ companyBlock.phone }}</div>
+            <div class="addr-line strong">{{ companyBlock.name }}</div>
+            <div class="addr-line" v-if="companyBlock.showTitle">"{{ companyBlock.title }}"</div>
+            <div class="addr-line" v-if="companyBlock.address">{{ companyBlock.address }}</div>
+            <div class="addr-line" v-if="companyBlock.phone">{{ companyBlock.phone }}</div>
           </div>
           <!-- Supplier -->
           <div class="panel supplier">
@@ -255,6 +255,35 @@
         <button class="btn" @click="doPrintImage">Print</button>
         <button class="btn" @click="doPrintImage">Export to PDF</button>
         <button class="btn" @click="shareLink">Share</button>
+
+        <!-- ✅ Correct edit/view links depending on handwriting presence -->
+        <RouterLink
+          v-if="isHandwritten"
+          class="btn btn--primary"
+          :to="handEditRoute"
+          title="Edit the handwritten canvas (previous strokes preserved)"
+        >
+          ✍️ Edit Handwriting
+        </RouterLink>
+
+        <RouterLink
+          v-else
+          class="btn btn--primary"
+          :to="typedEditRoute"
+          title="Edit this runsheet"
+        >
+          Edit
+        </RouterLink>
+
+        <RouterLink
+          v-if="isHandwritten"
+          class="btn"
+          :to="handViewRoute"
+          title="View the merged handwritten image"
+        >
+          View Handwritten
+        </RouterLink>
+
         <span v-if="shareMsg" class="share-msg">{{ shareMsg }}</span>
       </div>
     </div>
@@ -276,6 +305,32 @@ const me = ref(null);
 const rs = ref(null);
 const sheetEl = ref(null);
 
+/* ---------- NEW: handwriting presence + routes ---------- */
+const hasSavedHand = computed(() => {
+  const r = rs.value || {};
+  // consider common fields you may be using to store canvas data
+  const byHand = r.byHand || r.handwritten || r.canvas || null;
+  const hasJson    = byHand && (byHand.json || byHand.fabric || byHand.data);
+  const hasStrokes = byHand && Array.isArray(byHand.strokes) && byHand.strokes.length;
+  const hasSvg     = byHand && byHand.svg;
+  return !!(hasJson || hasStrokes || hasSvg);
+});
+const hasOcrImage = computed(() => !!(rs.value?.ocr?.latest?.image));
+const isHandwritten = computed(() => hasSavedHand.value || hasOcrImage.value);
+
+const typedEditRoute = computed(() => ({
+  name: 'runsheet-edit',
+  params: { slug: slug.value, id: route.params.id },
+}));
+const handEditRoute = computed(() => ({
+  name: 'runsheet-by-hand',
+  params: { slug: slug.value, id: route.params.id },
+  query:  { restore: '1' }, // hint canvas to restore saved data
+}));
+const handViewRoute = computed(() => ({
+  name: 'runsheet-handwritten',
+  params: { slug: slug.value, id: route.params.id },
+}));
 
 const safeSplitLines = (s) =>
   (s || '')
@@ -284,9 +339,9 @@ const safeSplitLines = (s) =>
     .filter(Boolean)
     .slice(0, 3);
 
-/* ---------------- Company block (from Production) ----------------
-   Prefer new fields; fall back to virtuals and legacy.
------------------------------------------------------------------- */
+/* ---------------- Company block (from Production) ---------------- */
+const production = ref(null);
+
 const companyAddrLines = computed(() =>
   safeSplitLines(
     production.value?.productionaddress ??
@@ -427,16 +482,11 @@ async function shareLink(){
 }
 
 /* ---------------- load ---------------- */
-// --- DB-backed Production (by slug) ---
-const production = ref(null);
-
 async function loadProduction() {
   if (!slug.value) { production.value = null; return; }
   try {
-    // GET /api/productions/by-slug/:slug
-    production.value = await api.get(`/tenant/productions/by-slug/${encodeURIComponent(slug.value)}`);
-    console.log(production.value._id);
-    production.value = await(api.get(`/tenant/productions/${production.value._id}`))
+    const p = await api.get(`/tenant/productions/by-slug/${encodeURIComponent(slug.value)}`);
+    production.value = await api.get(`/tenant/productions/${p._id}`);
   } catch {
     production.value = null;
   }
@@ -480,7 +530,7 @@ const companyBlock = computed(() => {
 });
 
 onMounted(async () => {
-  try { me.value = await api.get('/me'); } catch {}
+  try { me.value = await api.get('/auth/me'); } catch {}
 
   await loadProduction();
 

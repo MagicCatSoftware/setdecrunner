@@ -28,12 +28,15 @@ import peopleRoutes from './routes/people.js';
 import adminUsersRouter from './routes/adminuser.js';
 import setRoutes from './routes/sets.js';
 import productionRoutes from './routes/productions.js';
+import runsheetHandRouter from './routes/runsheetHand.js';
 
 import { authRequired, issueJwt } from './middleware/auth.js';
 import { requireMembership } from './middleware/requireMembership.js';
 
 // If you already have this service, we'll use it; otherwise the fallback below handles it.
 import { ensureTempAccountAndInvite } from './services/users.js';
+import ocrRouter from './routes/ocr.js';
+
 
 const app = express();
 
@@ -272,6 +275,8 @@ await mongoose.connect(process.env.MONGODB_URI);
 /* -------------------------------- Public routes --------------------------- */
 app.use('/auth', authRouter);
 app.use('/tenant/auth', authRouter);
+app.use('/tenant/ocr', ocrRouter);
+app.use('/tenant/runsheetsbyhand', runsheetHandRouter);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
