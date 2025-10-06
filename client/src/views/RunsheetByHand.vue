@@ -24,20 +24,7 @@
           </div>
         </div>
 
-        <!-- Canvas Stack -->
-        <div class="card canvas-wrap" ref="wrap">
-          <img
-            ref="bgEl"
-            class="bg"
-            :src="bgSrc"
-            alt="Runsheet"
-            @load="fitCanvas"
-            @error="bgFallbackErrored = true"
-          />
-          <canvas ref="inkEl" class="ink" />
-        </div>
-
-        <!-- Toolbar -->
+        <!-- Toolbar (moved above canvas) -->
         <div class="card toolbar">
           <div class="left">
             <strong>Runsheet By Hand</strong>
@@ -61,6 +48,111 @@
             <button class="btn" :disabled="!canUndo" @click="undo">↩ Undo</button>
             <button class="btn" @click="clearCanvasConfirm">🗑 Clear</button>
 
+            <!-- Helpers -->
+            <div class="helpers">
+              <!-- Supplier helper -->
+              <div class="helper"
+                   @mouseenter="open.suppliers = true; ensureLoaded('suppliers')"
+                   @mouseleave="open.suppliers = false">
+                <button class="btn">＋ Supplier</button>
+                <div class="popover" v-show="open.suppliers">
+                  <input class="input input--search"
+                        v-model.trim="q.suppliers"
+                        placeholder="Search suppliers…" />
+                  <div class="list">
+                    <button class="item"
+                            v-for="s in filteredSuppliers"
+                            :key="s._id || s.id"
+                            @click="insertFrom('suppliers', s)">
+                      <div class="item__title">{{ s.name }}</div>
+                      <div class="item__sub" v-if="s.phone || s.address">
+                        <span v-if="s.phone">{{ s.phone }}</span>
+                        <span v-if="s.phone && s.address"> · </span>
+                        <span v-if="s.address">{{ s.address }}</span>
+                      </div>
+                    </button>
+                    <div class="empty" v-if="!filteredSuppliers.length">No matches</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- People helper -->
+              <div class="helper"
+                   @mouseenter="open.people = true; ensureLoaded('people')"
+                   @mouseleave="open.people = false">
+                <button class="btn">＋ Person</button>
+                <div class="popover" v-show="open.people">
+                  <input class="input input--search"
+                        v-model.trim="q.people"
+                        placeholder="Search people…" />
+                  <div class="list">
+                    <button class="item"
+                            v-for="p in filteredPeople"
+                            :key="p._id || p.id"
+                            @click="insertFrom('people', p)">
+                      <div class="item__title">{{ p.name }}</div>
+                      <div class="item__sub" v-if="p.email || p.phone">
+                        <span v-if="p.email">{{ p.email }}</span>
+                        <span v-if="p.email && p.phone"> · </span>
+                        <span v-if="p.phone">{{ p.phone }}</span>
+                      </div>
+                    </button>
+                    <div class="empty" v-if="!filteredPeople.length">No matches</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Sets helper -->
+              <div class="helper"
+                   @mouseenter="open.sets = true; ensureLoaded('sets')"
+                   @mouseleave="open.sets = false">
+                <button class="btn">＋ Set</button>
+                <div class="popover" v-show="open.sets">
+                  <input class="input input--search"
+                        v-model.trim="q.sets"
+                        placeholder="Search sets…" />
+                  <div class="list">
+                    <button class="item"
+                            v-for="s in filteredSets"
+                            :key="s._id || s.id"
+                            @click="insertFrom('sets', s)">
+                      <div class="item__title">{{ s.title || s.name }}</div>
+                      <div class="item__sub" v-if="s.code || s.location">
+                        <span v-if="s.code">{{ s.code }}</span>
+                        <span v-if="s.code && s.location"> · </span>
+                        <span v-if="s.location">{{ s.location }}</span>
+                      </div>
+                    </button>
+                    <div class="empty" v-if="!filteredSets.length">No matches</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Places helper -->
+              <div class="helper"
+                   @mouseenter="open.places = true; ensureLoaded('places')"
+                   @mouseleave="open.places = false">
+                <button class="btn">＋ Place</button>
+                <div class="popover" v-show="open.places">
+                  <input class="input input--search"
+                        v-model.trim="q.places"
+                        placeholder="Search places…" />
+                  <div class="list">
+                    <button class="item"
+                            v-for="p in filteredPlaces"
+                            :key="p._id || p.id"
+                            @click="insertFrom('places', p)">
+                      <div class="item__title">{{ p.name }}</div>
+                      <div class="item__sub" v-if="p.address">
+                        {{ p.address }}
+                      </div>
+                    </button>
+                    <div class="empty" v-if="!filteredPlaces.length">No matches</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <button class="btn" :disabled="saving" @click="saveStrokes">
               {{ saving ? 'Saving…' : 'Save' }}
             </button>
@@ -69,6 +161,19 @@
               {{ ai.loading ? 'Uploading…' : 'Save & Send to AI' }}
             </button>
           </div>
+        </div>
+
+        <!-- Canvas Stack -->
+        <div class="card canvas-wrap" ref="wrap">
+          <img
+            ref="bgEl"
+            class="bg"
+            :src="bgSrc"
+            alt="Runsheet"
+            @load="fitCanvas"
+            @error="bgFallbackErrored = true"
+          />
+          <canvas ref="inkEl" class="ink" />
         </div>
 
         <!-- Results (latest OCR) -->
@@ -168,6 +273,121 @@ function fitCanvas() {
   renderAll();
 }
 
+// CHUNK 2A: helper state
+const open = reactive({ suppliers: false, people: false, sets: false, places: false });
+const q = reactive({ suppliers: '', people: '', sets: '', places: '' });
+
+const lists = reactive({
+  suppliers: [],
+  people: [],
+  sets: [],
+  places: [],
+});
+const loaded = reactive({ suppliers: false, people: false, sets: false, places: false });
+const loadingLists = reactive({ suppliers: false, people: false, sets: false, places: false });
+
+// Endpoint map (adjust if your API differs)
+const ENDPOINTS = {
+  suppliers: '/tenant/suppliers',
+  people: '/tenant/people',
+  sets: '/tenant/sets',
+  places: '/tenant/places',
+};
+
+// CHUNK 2B: ensure + load lists
+async function ensureLoaded(kind) {
+  if (loaded[kind] || loadingLists[kind]) return;
+  loadingLists[kind] = true;
+  try {
+    // Try to ask only for lightweight fields if your API supports `fields`
+    const res = await apiGet(ENDPOINTS[kind], { limit: 500, fields: 'name,title,code,phone,email,address,location' });
+    lists[kind] = Array.isArray(res?.items) ? res.items
+                 : Array.isArray(res)        ? res
+                 : [];
+    loaded[kind] = true;
+  } catch (e) {
+    console.warn(`Failed to load ${kind}:`, e?.message || e);
+    lists[kind] = [];
+  } finally {
+    loadingLists[kind] = false;
+  }
+}
+
+// CHUNK 2C: filters
+const filteredSuppliers = computed(() => {
+  const s = (q.suppliers || '').toLowerCase();
+  return lists.suppliers.filter(x =>
+    !s ||
+    (x.name && x.name.toLowerCase().includes(s)) ||
+    (x.phone && String(x.phone).toLowerCase().includes(s)) ||
+    (x.address && x.address.toLowerCase().includes(s))
+  ).slice(0, 100);
+});
+const filteredPeople = computed(() => {
+  const s = (q.people || '').toLowerCase();
+  return lists.people.filter(x =>
+    !s ||
+    (x.name && x.name.toLowerCase().includes(s)) ||
+    (x.email && x.email.toLowerCase().includes(s)) ||
+    (x.phone && String(x.phone).toLowerCase().includes(s))
+  ).slice(0, 100);
+});
+const filteredSets = computed(() => {
+  const s = (q.sets || '').toLowerCase();
+  return lists.sets.filter(x => {
+    const title = x.title || x.name || '';
+    return !s ||
+      title.toLowerCase().includes(s) ||
+      (x.code && String(x.code).toLowerCase().includes(s)) ||
+      (x.location && x.location.toLowerCase().includes(s));
+  }).slice(0, 100);
+});
+const filteredPlaces = computed(() => {
+  const s = (q.places || '').toLowerCase();
+  return lists.places.filter(x =>
+    !s ||
+    (x.name && x.name.toLowerCase().includes(s)) ||
+    (x.address && x.address.toLowerCase().includes(s))
+  ).slice(0, 100);
+});
+
+// CHUNK 2D: text-stamp insertion
+const pendingText = ref('');
+
+// Formats the selected item into a single-line stamp
+function formatStamp(kind, item) {
+  switch (kind) {
+    case 'suppliers': {
+      const bits = [item.name, item.phone, item.address].filter(Boolean);
+      return bits.join(' · ');
+    }
+    case 'people': {
+      const bits = [item.name, item.email, item.phone].filter(Boolean);
+      return bits.join(' · ');
+    }
+    case 'sets': {
+      const title = item.title || item.name;
+      const bits = [title, item.code, item.location].filter(Boolean);
+      return bits.join(' · ');
+    }
+    case 'places': {
+      const bits = [item.name, item.address].filter(Boolean);
+      return bits.join(' · ');
+    }
+    default:
+      return '';
+  }
+}
+
+function insertFrom(kind, item) {
+  const text = formatStamp(kind, item);
+  if (!text) return;
+  pendingText.value = text;
+  mode.value = 'text'; // arm text tool; next click places it
+  // close any open popover
+  open.suppliers = open.people = open.sets = open.places = false;
+}
+
 function renderAll() {
   if (!ctx.value || !inkEl.value) return;
   const c = inkEl.value;
@@ -188,6 +408,24 @@ function renderStrokesTo(targetCtx, w, h) {
   targetCtx.lineCap  = 'round';
 
   for (const s of strokes.value) {
+    // CHUNK 3.3: render text stamps
+    if (s.tool === 'text' && s.text && s.at) {
+      targetCtx.save();
+      targetCtx.globalCompositeOperation = 'source-over';
+      targetCtx.fillStyle = s.color || '#000';
+      // scale text size against canvas size; tweak multiplier to taste
+      const bw = baseWidth.value || w;
+      const bh = baseHeight.value || h;
+      const sx = w / (bw || w);
+      const sy = h / (bh || h);
+      const sScale = (sx + sy) / 2;
+      const px = Math.max(10, (s.size || 14) * sScale * 3); // <-- adjust 3 for bigger/smaller
+      targetCtx.font = `${px}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto`;
+      targetCtx.textBaseline = 'top';
+      targetCtx.fillText(String(s.text), s.at.x * w, s.at.y * h);
+      targetCtx.restore();
+      continue; // don't run the stroke path logic for text
+    }
     if (!s?.points?.length) continue;
 
     const isEraser = s.tool === 'eraser';
@@ -232,6 +470,27 @@ let currentStroke = null;
 
 function start(e) {
   if (!ctx.value || !inkEl.value) return;
+
+  // If we're placing a text stamp, do that and exit
+  if (mode.value === 'text' && pendingText.value) {
+    const p = toCanvasXY(e);
+    const norm = toNorm(p);
+    const stamp = {
+      tool: 'text',
+      text: pendingText.value,
+      color: pen.color,
+      size: pen.size,      // base size; will scale with canvas
+      at: norm,            // { x, y } normalized 0..1
+    };
+    strokes.value.push(stamp);
+    pendingText.value = '';
+    renderAll();
+    scheduleSave(300);
+    e.preventDefault();
+    return;
+  }
+
+  // Pen / eraser path
   drawing.value = true;
   const p = toCanvasXY(e);
   last.x = p.x; last.y = p.y;
@@ -248,7 +507,9 @@ function start(e) {
 }
 
 function move(e) {
-  if (!drawing.value || !ctx.value || !currentStroke) return;
+    if (mode.value === 'text') return;
+
+if (!drawing.value || !ctx.value || !currentStroke) return;
   const p = toCanvasXY(e);
   const pressure = e.pressure && e.pressure > 0 ? e.pressure : 1;
 
@@ -427,5 +688,36 @@ onBeforeUnmount(() => {
 .canvas-wrap.card { padding: 0; }                                     /* ensure zero padding */
 .bg { width: 100%; height: auto; display: block; pointer-events: none; user-select: none; }
 .ink { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+/* CHUNK 4: helper popovers */
+.helpers { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.helper { position: relative; }
+.popover {
+  position: absolute;
+  top: 110%;
+  left: 0;
+  z-index: 50;
+  min-width: 320px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
+}
+.input--search { width: 100%; margin-bottom: 6px; }
+.list { display: grid; gap: 4px; }
+.item {
+  text-align: left;
+  border: 1px solid #eef0f3;
+  background: #fafafa;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+}
+.item:hover { background: #f0f4ff; border-color: #dbe7ff; }
+.item__title { font-weight: 600; }
+.item__sub { font-size: 12px; color: #666; }
+.empty { padding: 10px; color: #777; text-align: center; }
 </style>
 

@@ -32,7 +32,7 @@ const Items                  = () => import('./views/Items.vue');
 const Places                 = () => import('./views/Places.vue');
 const AdminUsers             = () => import('./views/AdminUsers.vue');
 
-// Productions screens
+// Productions
 const Productions            = () => import('./views/Productions.vue');
 const ProductionEditor       = () => import('./views/ProductionEditor.vue');
 
@@ -53,7 +53,6 @@ function getToken() {
   const t = localStorage.getItem('token');
   return t && t !== 'undefined' && t !== 'null' ? t : '';
 }
-
 function decodeJwtPayload(t) {
   try {
     const parts = String(t).split('.');
@@ -63,10 +62,7 @@ function decodeJwtPayload(t) {
     return JSON.parse(atob(b64 + pad));
   } catch { return null; }
 }
-
-/** If token is missing => false.
- *  If token decodes & exp in past => false (and clear).
- *  If token is opaque or non-expiring => true. */
+/** token missing => false; expired JWT => false (and clear); opaque/non-expiring => true */
 function isAuthed() {
   const t = getToken();
   if (!t) return false;
@@ -77,7 +73,6 @@ function isAuthed() {
   }
   return true;
 }
-
 function userHasProduction(prodId) {
   try {
     const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -103,28 +98,68 @@ function hardLogout() {
   try { window.dispatchEvent(new Event('focus')); } catch {}
 }
 
-/* Owner/Tenant mode: set the right unauthorized handler each time */
+/* Owner/Tenant unauthorized handlers */
 function enterOwnerMode(router, fullPath) {
   try { api.setProductionId?.(''); } catch {}
   try {
     api.setUnauthorizedHandler?.(() => {
-      router.replace({ name: 'owner-login', query: { r: fullPath }, replace: true });
+      if (router.currentRoute.value.name !== 'owner-login') {
+        router.replace({ name: 'owner-login', query: { r: fullPath }, replace: true });
+      }
     });
   } catch {}
 }
 function enterTenantMode(router, slug, fullPath) {
   try {
     api.setUnauthorizedHandler?.(() => {
-      router.replace({ name: 'tenant-login', params: { slug }, query: { r: fullPath }, replace: true });
+      if (router.currentRoute.value.name !== 'tenant-login') {
+        router.replace({ name: 'tenant-login', params: { slug }, query: { r: fullPath }, replace: true });
+      }
     });
   } catch {}
 }
 
-/* Helper: persist token from OAuth handoff and notify app/navs */
+/* OAuth helper */
 function setTokenAndNotify(token) {
   try { localStorage.setItem('token', token); } catch {}
   try { window.dispatchEvent(new Event('storage')); } catch {}
   try { window.dispatchEvent(new Event('focus')); } catch {}
+}
+
+/* Resolve pid & hydrate user for a slug (de-duped) */
+const _pidPromises = new Map();
+async function ensurePidAndUserForSlug(slug) {
+  const existing = localStorage.getItem('currentProductionId') || '';
+  if (existing) return existing;
+
+  if (_pidPromises.has(slug)) return _pidPromises.get(slug);
+
+  const p = (async () => {
+    // 1) Resolve pid WITHOUT Authorization
+    const prod = await apiGet(`/productions/by-slug/${encodeURIComponent(slug)}`, undefined, {
+      headers: { Authorization: '' },
+    });
+    const pid = String(prod._id || '');
+
+    // 2) Persist + set
+    try { localStorage.setItem('lastSlug', slug); } catch {}
+    try { localStorage.setItem('currentProductionId', pid); } catch {}
+    try { api.setProductionId?.(pid); } catch {}
+
+    // 3) If authed, hydrate /auth/me once so membership is fresh
+    if (isAuthed()) {
+      try {
+        const me = await apiGet('/auth/me');
+        try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
+      } catch {
+        // ignore; unauthorized handler will take care of redirect on next API call if needed
+      }
+    }
+    return pid;
+  })();
+
+  _pidPromises.set(slug, p);
+  try { return await p; } finally { _pidPromises.delete(slug); }
 }
 
 /* ---------------- router ---------------- */
@@ -139,7 +174,7 @@ const router = createRouter({
     { path: '/features', name: 'features', component: Features },
     { path: '/FAQ', name: 'FAQ', component: FAQ },
 
-    // ----- Owner area (not tenant-scoped) -----
+    // Owner area
     { path: '/owner/login', name: 'owner-login', component: OwnerLogin, meta: { guestOnlyOwner: true, ownerArea: true } },
     {
       path: '/owner/logout',
@@ -155,7 +190,7 @@ const router = createRouter({
       meta: { requiresAuth: true, ownerArea: true },
     },
 
-    // ----- Global logout (outside tenant) -----
+    // Global logout
     {
       path: '/logout',
       name: 'root-logout',
@@ -169,16 +204,14 @@ const router = createRouter({
 
     { path: '/set-password', name: 'set-password', component: SetPassword },
 
-    // ----- Tenant area (scoped by :slug) -----
+    // Tenant area
     {
       path: '/:slug',
       component: SlugLayout,
       async beforeEnter(to) {
         const slug = String(to.params.slug || '').toLowerCase();
         try {
-          const prod = await apiGet(`/productions/by-slug/${encodeURIComponent(slug)}`);
-          localStorage.setItem('lastSlug', slug);
-          localStorage.setItem('currentProductionId', prod._id);
+          await ensurePidAndUserForSlug(slug);
           enterTenantMode(router, slug, to.fullPath);
           return true;
         } catch {
@@ -221,7 +254,7 @@ const router = createRouter({
         { path: 'runsheets/:id',        name: 'runsheet-edit',    component: RunSheetEditor, props: true, meta: { requiresAuth: true, requiresMembership: true } },
         { path: 'runsheets/:id/beta',   name: 'runsheet-beta',    component: RunSheetsBeta,  props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
-        // ✍️ Canvas
+        // Canvas
         { path: 'runsheets/:id/by-hand', name: 'runsheet-by-hand', component: RunSheetByHand, props: true, meta: { requiresAuth: true, requiresMembership: true } },
 
         // Smart view
@@ -276,8 +309,8 @@ const router = createRouter({
 });
 
 /* ---------------- global guard ---------------- */
-router.beforeEach((to) => {
-  // 0) OAuth handoff catcher: persist ?token=… from ANY route, then go to r=… or a sane default
+router.beforeEach(async (to) => {
+  // 0) OAuth handoff catcher (persist ?token=… once)
   const q = to.query || {};
   const tokenQ = typeof q.token === 'string' ? q.token : '';
   if (tokenQ) {
@@ -298,7 +331,7 @@ router.beforeEach((to) => {
     return { path: nextPath, query: nextQuery, replace: true };
   }
 
-  // 1) Owner area guard
+  // 1) Owner area
   const isOwnerRoute = to.meta?.ownerArea || to.path.startsWith('/owner');
   if (isOwnerRoute) {
     enterOwnerMode(router, to.fullPath);
@@ -312,14 +345,19 @@ router.beforeEach((to) => {
     return true;
   }
 
-  // 2) Tenant area guard
+  // 2) Tenant area
   const isTenant = !!to.params?.slug;
   if (!isTenant) return true;
 
   const slug = String(to.params.slug);
-  const prodId = localStorage.getItem('currentProductionId') || '';
-
   enterTenantMode(router, slug, to.fullPath);
+
+  // ensure pid + user hydrated before checks
+  let prodId = localStorage.getItem('currentProductionId') || '';
+  if (!prodId) {
+    try { prodId = await ensurePidAndUserForSlug(slug); }
+    catch { return { path: '/', replace: true }; }
+  }
 
   if (to.meta?.guestOnlyTenant) {
     if (isAuthed() && userHasProduction(prodId)) {
@@ -333,13 +371,22 @@ router.beforeEach((to) => {
   }
 
   if (to.meta?.requiresMembership && !userHasProduction(prodId)) {
-    return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath, err: 'not-authorized' }, replace: true };
+    // try one hydration (in case user cache is stale)
+    try {
+      const me = await apiGet('/auth/me');
+      try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
+    } catch {}
+    if (!userHasProduction(prodId)) {
+      return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath, err: 'not-authorized' }, replace: true };
+    }
   }
 
   return true;
 });
 
 export default router;
+
+
 
 
 

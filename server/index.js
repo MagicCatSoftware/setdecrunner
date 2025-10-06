@@ -36,6 +36,7 @@ import { requireMembership } from './middleware/requireMembership.js';
 // If you already have this service, we'll use it; otherwise the fallback below handles it.
 import { ensureTempAccountAndInvite } from './services/users.js';
 import ocrRouter from './routes/ocr.js';
+import ownerRoutes from './routes/owner.js';
 
 
 const app = express();
@@ -277,6 +278,7 @@ app.use('/auth', authRouter);
 app.use('/tenant/auth', authRouter);
 app.use('/tenant/ocr', ocrRouter);
 app.use('/tenant/runsheetsbyhand', runsheetHandRouter);
+app.use('/owner/productions',ownerRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
