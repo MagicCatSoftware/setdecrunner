@@ -356,6 +356,7 @@ const load = async () => {
     const headers = authHeaders();
     const query = q.value ? { q: q.value } : {};
     list.value = await api.get('/tenant/admin/users' + qs(query), { headers });
+    list.value = list.value.members;
     stamp();
   } catch (e) {
     error.value = e?.response?.data?.error || e.message || 'Failed to load users';
