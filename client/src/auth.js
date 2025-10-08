@@ -101,7 +101,7 @@ async function fetchMe() {
     if (state.productionId) api.setProductionId(state.productionId);
     if (state.token) api.setToken(state.token);
 
-    const me = await api.get('/auth/me');
+    const me = await api.get('/tenant/tenantauth/me');
     state.user = me || null;
 
     // (Optional) cache for faster warm start
@@ -160,14 +160,14 @@ export function performLogout(router, slug) {
 
 /* Optional helpers if you still use these somewhere */
 async function loginLocal({ identifier, password, slug }) {
-  const { token } = await api.post('/auth/login', { identifier, password, slug });
+  const { token } = await api.post('/tenant/tenantauth/login', { identifier, password, slug });
   persistToken(token);
   await bootstrapForSlug(slug);
   return state.user;
 }
 
 async function registerLocal(payload) {
-  const { token } = await api.post('/auth/register', payload);
+  const { token } = await api.post('/tenant/tenantauth/register', payload);
   persistToken(token);
   // No slug here; caller should immediately call bootstrapForSlug(slug)
   await fetchMe();

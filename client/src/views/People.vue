@@ -125,7 +125,7 @@ const goNew = () => router.push({ name: 'person-new', params: { slug: slug.value
 
 onMounted(async () => {
   try {
-    me.value = await apiGet('/auth/me');
+    me.value = await apiGet('/tenant/tenantauth/me');
   } catch {
     me.value = null;
   }

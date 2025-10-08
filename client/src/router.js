@@ -149,7 +149,7 @@ async function ensurePidAndUserForSlug(slug) {
     // 3) If authed, hydrate /auth/me once so membership is fresh
     if (isAuthed()) {
       try {
-        const me = await apiGet('/auth/me');
+        const me = await apiGet('/auth/tenantauth/me');
         try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
       } catch {
         // ignore; unauthorized handler will take care of redirect on next API call if needed
@@ -373,7 +373,7 @@ router.beforeEach(async (to) => {
   if (to.meta?.requiresMembership && !userHasProduction(prodId)) {
     // try one hydration (in case user cache is stale)
     try {
-      const me = await apiGet('/auth/me');
+      const me = await apiGet('/tenant/tenantauth/me');
       try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
     } catch {}
     if (!userHasProduction(prodId)) {

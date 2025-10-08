@@ -648,7 +648,7 @@ async function loadHand() {
 
 // ---- lifecycle ----
 onMounted(async () => {
-  try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
+  try { me.value = await apiGet('/tenant/tenantauth/me'); } catch { me.value = null; }
   await loadRunsheet();
 
   const el = inkEl.value;

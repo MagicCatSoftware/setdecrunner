@@ -162,7 +162,7 @@ async function loadRunsheet() {
 }
 
 onMounted(async () => {
-  try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
+  try { me.value = await apiGet('/auth/tenantauth/me'); } catch { me.value = null; }
   await loadRunsheet();
 });
 </script>

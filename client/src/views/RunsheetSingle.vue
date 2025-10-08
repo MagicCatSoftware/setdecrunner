@@ -530,7 +530,7 @@ const companyBlock = computed(() => {
 });
 
 onMounted(async () => {
-  try { me.value = await api.get('/auth/me'); } catch {}
+  try { me.value = await api.get('/tenant/tenantauth/me'); } catch {}
 
   await loadProduction();
 

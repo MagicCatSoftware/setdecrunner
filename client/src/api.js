@@ -1,5 +1,3 @@
-// client/src/api.js
-
 // -------- Optional helper: access the auth store without a hard import cycle.
 export async function getAuth() {
   const mod = await import('./auth.js');
@@ -37,6 +35,35 @@ function notifyEnvChange() {
   try { window.dispatchEvent(new Event('focus')); } catch {}
 }
 
+const HEX24 = /^[a-f0-9]{24}$/i;
+function isValidPid(s) { return HEX24.test(String(s || '')); }
+
+// Slug helpers
+const RESERVED_PREFIXES = new Set([
+  'owner','pricing','features','faq','purchase','thank-you','set-password',
+  'login','logout','register','signup','about','contact','help','support',
+  'terms','privacy','dashboard','api','assets','static','auth'
+]);
+
+function pickSlugFromQuery() {
+  try {
+    const sp = new URLSearchParams(window.location.search);
+    const v = sp.get('slug') || '';
+    return String(v || '').trim().toLowerCase();
+  } catch { return ''; }
+}
+function pickSlugFromLocation() {
+  try {
+    const seg = (window.location.pathname || '/')
+      .split('/')
+      .filter(Boolean)
+      .map(s => decodeURIComponent(s).toLowerCase());
+    const first = seg[0] || '';
+    if (!first || RESERVED_PREFIXES.has(first)) return '';
+    return first;
+  } catch { return ''; }
+}
+
 // cross-tab sync
 try {
   window.addEventListener('storage', (e) => {
@@ -67,6 +94,23 @@ export function setUnauthorizedHandler(fn) {
 export function initFromStorage() {
   setToken(safeRead('token'));
   setProductionId(safeRead('currentProductionId'));
+}
+
+// ---------------------------------------------------------------------------
+/** Resolve and persist a production id if missing/invalid. ALWAYS tries before requests. */
+async function ensurePidForRequest() {
+  if (isValidPid(_prodId)) return _prodId;
+
+  // 1) Query param wins
+  const fromQ = pickPidFromQuery();
+  if (isValidPid(fromQ)) {
+    setProductionId(fromQ);
+    return _prodId;
+  }
+
+  // 2) Try to resolve by slug via public endpoint
+  const ok = await tryRecoverPidFromSlug();
+  return ok ? _prodId : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +157,7 @@ function buildHeaders(extra = {}, { isForm = false, hasBody = false } = {}) {
     h['Content-Type'] = 'application/json';
   }
 
-  // Freshen token/production id from storage on every request (fixes 401 right after login)
+  // Freshen token/pid from storage on every request
   if (!_token)  _token  = safeRead('token');
   if (!_prodId) _prodId = safeRead('currentProductionId');
 
@@ -121,13 +165,9 @@ function buildHeaders(extra = {}, { isForm = false, hasBody = false } = {}) {
   const hasAuthHeader = ('authorization' in extraL) || (TOKEN_HEADER in extraL);
   if (!hasAuthHeader) applyTokenHeader(h);
 
-  // Tenant scope header unless caller asks to skip
-  const skipPid = extraL['x-skip-pid'] === '1';
-  if (!skipPid && _prodId) {
-    if (!('x-production-id' in toLowerKeys(h))) {
-      h['X-Production-Id'] = _prodId;
-    }
-  }
+  // 🔒 ALWAYS send tenant headers
+  h['X-Production-Id']   = _prodId || '';
+  h['X-Production-Slug'] = pickSlugFromQuery() || pickSlugFromLocation() || '';
 
   if (!('X-Requested-With' in h)) h['X-Requested-With'] = 'fetch';
   return h;
@@ -141,6 +181,11 @@ export async function apiFetch(method, path, { params, body, headers, credential
   if (!_token)  _token  = safeRead('token');
   if (!_prodId) _prodId = safeRead('currentProductionId');
 
+  // Proactively resolve a PID if we don't have a valid one yet
+  if (!isValidPid(_prodId)) {
+    await ensurePidForRequest();
+  }
+
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
   const url = buildUrl(path, params);
 
@@ -149,7 +194,6 @@ export async function apiFetch(method, path, { params, body, headers, credential
 
   const extra = { ...(headers || {}) };
   const alreadyRetried = extra['x-api-retried'] === '1';
-  const usedPid = !!_prodId && extra['x-skip-pid'] !== '1';
 
   let res;
   try {
@@ -195,17 +239,6 @@ export async function apiFetch(method, path, { params, body, headers, credential
       }
     }
 
-    // 404 on non-tenant endpoint while we sent X-Production-Id → retry ONCE w/o PID
-    const isTenantPath = String(path).startsWith('/tenant') || String(url).includes('/tenant/');
-    if (res.status === 404 && usedPid && !alreadyRetried && !isTenantPath) {
-      return apiFetch(method, path, {
-        params,
-        body,
-        headers: { ...extra, 'x-api-retried': '1', 'x-skip-pid': '1' },
-        credentials,
-      });
-    }
-
     // Unauthorized → delegate to router handler if present
     if ((res.status === 401 || res.status === 403) && _unauthHandler) {
       try { _unauthHandler(); } catch {}
@@ -239,13 +272,12 @@ function shouldAttemptPidRecovery(data) {
 
 // Try to recover pid by reading ?pid=… or resolving by slug → GET /productions/by-slug/:slug
 async function tryRecoverPidFromSlug() {
-  // 1) Query param wins
+  // 1) Query param
   const pid = pickPidFromQuery();
-  if (pid) { setProductionId(pid); return true; }
+  if (isValidPid(pid)) { setProductionId(pid); return true; }
 
-  // 2) Parse slug from current location: "/:slug(/…)?"
-  let slug = '';
-  try { slug = (window.location.pathname || '/').split('/').filter(Boolean)[0] || ''; } catch {}
+  // 2) Slug from ?slug= or first path segment
+  const slug = (pickSlugFromQuery() || pickSlugFromLocation() || '').trim();
   if (!slug) return false;
 
   // 3) Resolve pid using an endpoint that does NOT require x-production-id
@@ -255,12 +287,16 @@ async function tryRecoverPidFromSlug() {
       method: 'GET',
       mode: 'cors',
       credentials: 'omit',
-      headers: buildHeaders({}, { isForm: false, hasBody: false }),
+      headers: {
+        Accept: 'application/json',
+        'X-Requested-With': 'fetch',
+        'X-Production-Slug': slug, // hint to backend logs/metrics
+      },
     });
     if (!res.ok) return false;
     const p = await res.json().catch(() => null);
     const found = p && (p._id || p.id);
-    if (found && /^[a-f0-9]{24}$/i.test(String(found))) {
+    if (isValidPid(found)) {
       setProductionId(String(found));
       return true;
     }
@@ -274,7 +310,7 @@ function pickPidFromQuery() {
     const sp = new URLSearchParams(window.location.search);
     const pid = sp.get('pid') || sp.get('productionId') || sp.get('production_id');
     const v = pid ? String(pid).trim() : '';
-    return v && /^[a-f0-9]{24}$/i.test(v) ? v : '';
+    return isValidPid(v) ? v : '';
   } catch { return ''; }
 }
 
@@ -327,5 +363,6 @@ const api = {
 };
 
 export default api;
+
 
 

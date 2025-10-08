@@ -226,7 +226,7 @@ function flyTo(s) {
 
 onMounted(async () => {
   try {
-    me.value = await apiGet('/auth/me');
+    me.value = await apiGet('/tenant/tenantauth/me');
   } catch {
     me.value = null;
   }

@@ -217,7 +217,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import NavBar from '../components/NavBar.vue';
 import { useAuth } from '../auth.js';
 import api, { apiGet } from '../api.js';
@@ -272,18 +272,35 @@ function toId(v) {
   try { const s = v.toString?.(); return HEX24.test(s) ? s : ''; } catch { return ''; }
 }
 
+/** Set PID everywhere (localStorage + api helper) */
+function setPid(pid) {
+  const v = String(pid || '').trim();
+  if (!HEX24.test(v)) return;
+  resolvedProdId.value = v;
+  localStorage.setItem('currentProductionId', v);
+  if (typeof api.setProductionId === 'function') {
+    api.setProductionId(v); // ensures api helper always sends X-Production-Id
+  }
+}
+
+/** Try to resolve PID from query, storage, or public slug endpoint */
 async function ensureProduction() {
-  // Keep current prod id if we already have one; otherwise try to resolve from slug
-  if (HEX24.test(resolvedProdId.value)) return;
+  // 1) Query (?pid, ?productionId, ?production_id)
+  const sp = new URLSearchParams(window.location.search || '');
+  const qp = sp.get('pid') || sp.get('productionId') || sp.get('production_id');
+  if (qp && HEX24.test(qp)) { setPid(qp); return; }
+
+  // 2) Existing storage
+  const stored = localStorage.getItem('currentProductionId') || '';
+  if (HEX24.test(stored)) { setPid(stored); return; }
+
+  // 3) Public by-slug resolver (NO tenant header required)
   if (!slug.value) return;
   try {
-    const p = await apiGet(`/tenant/productions/${slug.value}`);
+    const p = await apiGet(`/productions/by-slug/${encodeURIComponent(slug.value)}`);
     prod.value = p || null;
     const pid = toId(p?._id);
-    if (pid) {
-      resolvedProdId.value = pid;
-      localStorage.setItem('currentProductionId', pid);
-    }
+    if (pid) setPid(pid);
   } catch {
     prod.value = null;
   }
@@ -292,10 +309,10 @@ async function ensureProduction() {
 /* ---------- request helpers ---------- */
 function prodIdHeader() {
   const pid = String(resolvedProdId.value || '').trim();
-  return HEX24.test(pid) ? { 'x-production-id': pid } : {};
+  return HEX24.test(pid) ? { 'X-Production-Id': pid } : {};
 }
 function authHeaders() {
-  // Your api helper should also attach Authorization: Bearer <JWT>
+  // api helper also sends Authorization + X-Production-Id (after setPid); we include header explicitly too.
   return { ...prodIdHeader() };
 }
 function qs(obj = {}) {
@@ -326,7 +343,7 @@ async function checkAdminAccess() {
   try {
     await api.get('/tenant/admin/users?probe=1', { headers: authHeaders() });
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -430,12 +447,11 @@ const createUser = async () => {
       email:     createForm.value.email,
       username:  createForm.value.username || undefined,
       role:      createForm.value.role,
-      siteAuthorized: !!createForm.value.siteAuthorized, // send directly on POST
+      siteAuthorized: !!createForm.value.siteAuthorized,
     };
 
     const resp = await api.post('/tenant/admin/users', body, { headers });
 
-    // resp is expected to be { ok: true, userId, productionId }
     if (!resp?.ok) throw new Error('Create failed');
 
     createMsg.value = 'Invitation sent';
@@ -450,13 +466,22 @@ const createUser = async () => {
 
 /* ---------- lifecycle ---------- */
 onMounted(async () => {
-  try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
-  await ensureProduction(); // resolve production id
-  allowed.value = await checkAdminAccess(); // backend is source of truth
+  try { me.value = await apiGet('/tenant/tenantauth/me'); } catch { me.value = null; }
+
+  await ensureProduction();          // resolve and SET the PID (api.setProductionId + storage)
+  allowed.value = await checkAdminAccess(); // backend validates membership/admin
   checked.value = true;
   if (allowed.value) await load();
 });
+
+/* If slug changes (router), re-resolve PID and reload. */
+watch(() => slug.value, async () => {
+  await ensureProduction();
+  allowed.value = await checkAdminAccess();
+  if (allowed.value) await load();
+});
 </script>
+
 
 <style scoped>
 .users-page { padding: 16px; }

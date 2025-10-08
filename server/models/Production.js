@@ -1,3 +1,4 @@
+// server/models/Production.js
 import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
@@ -8,13 +9,31 @@ const RESERVED = new Set([
   'api','assets','static','auth','users'
 ]);
 
+/** Per-production member row (authoritative for tenant access) */
 const MemberSchema = new Schema(
   {
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    role: { type: String, enum: ['admin', 'editor', 'viewer'], default: 'editor' },
+    // Optional backing ref to a User doc (used throughout the app)
+    user: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+
+    // Role within this production (expanded to match app usage)
+    role: {
+      type: String,
+      enum: ['admin', 'editor', 'viewer', 'coordinator', 'driver', 'user'],
+      default: 'editor'
+    },
+
+    // 🚦 Admin must flip this to true before tenant access is granted
+    siteAuthorized: { type: Boolean, default: false, index: true },
+
     addedAt: { type: Date, default: Date.now },
+
+    // Login identifier inside the tenant scope
+    email:   { type: String, trim: true, lowercase: true, index: true },
+
+    // Per-member credential for tenant login (not selected by default)
+    passwordHash: { type: String, select: false },
   },
-  { _id: false }
+  { _id: true }
 );
 
 export function normalizeSlug(input = '') {
@@ -26,27 +45,27 @@ export function normalizeSlug(input = '') {
     .replace(/(^-|-$)/g, '');
 }
 
-// server/models/Production.js  (add fields if not present)
-
 const ProductionSchema = new Schema(
   {
     title: { type: String, required: true, trim: true },
     slug:  { type: String, required: true, trim: true, unique: true, index: true },
 
-    // Who claimed ownership first (used as the canonical admin)
+    // Canonical owner (tenant admin)
     ownerUserId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 
-    // Per-production memberships (authoritative for roles)
+    // Per-production memberships (authoritative for roles & tenant auth)
     members: { type: [MemberSchema], default: [] },
 
-    // (existing) Stripe & flags
+    // Stripe & flags
     stripe:   { type: Schema.Types.Mixed, default: {} },
     isActive: { type: Boolean, default: true },
-     productionphone:   { type: String, trim: true, default: '' },
+
+    // Production profile fields (both new + legacy aliases)
+    productionphone:   { type: String, trim: true, default: '' },
     productionaddress: { type: String, trim: true, default: '' },
     productioncompany: { type: String, trim: true, default: '' },
 
-    // (Optional) legacy/aliases so old code continues to work
+    // Legacy/aliases so old code continues to work
     name:    { type: String, trim: true, default: '' },
     phone:   { type: String, trim: true, default: '' },
     address: { type: String, trim: true, default: '' },
@@ -54,8 +73,6 @@ const ProductionSchema = new Schema(
   },
   { timestamps: true }
 );
-
-
 
 ProductionSchema.pre('validate', function(next) {
   if (this.slug) this.slug = normalizeSlug(this.slug);
@@ -70,7 +87,6 @@ ProductionSchema.virtual('vCompanyName').get(function () {
   return this.productioncompany || this.company || this.productionname || this.name || '';
 });
 ProductionSchema.virtual('vProductionTitle').get(function () {
-  // If you want a distinct “title” (show/production title) separate from company name:
   return this.productionname || this.name || '';
 });
 ProductionSchema.virtual('vPhone').get(function () {
@@ -80,6 +96,8 @@ ProductionSchema.virtual('vAddress').get(function () {
   return this.productionaddress || this.address || '';
 });
 
-ProductionSchema.index({ 'members.user': 1 }); // fast membership lookups
+// Indexes for common lookups
+ProductionSchema.index({ 'members.user': 1 });
+ProductionSchema.index({ 'members.email': 1 });
 
 export default mongoose.model('Production', ProductionSchema);

@@ -724,7 +724,7 @@ const shortDate = (d) => {
 
 /* boot */
 onMounted(async () => {
-  try { me.value = await apiGet('/auth/me'); } catch { me.value = null; }
+  try { me.value = await apiGet('/tenant/tenantauth/me'); } catch { me.value = null; }
   await ensureProductionId();
   await load();
 });

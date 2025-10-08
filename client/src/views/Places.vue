@@ -835,7 +835,7 @@ onMounted(async () => {
   await ensureProductionHeader();
 
   try {
-    me.value = await apiGet('/auth/me');
+    me.value = await apiGet('/tenant/tenantauth/me');
   } catch {
     me.value = null;
   }

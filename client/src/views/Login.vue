@@ -134,7 +134,7 @@ const facebookUrl = computed(() => `${apiBase}/auth/facebook?slug=${encodeURICom
 async function afterAuthNavigate() {
   // Ensure we **have** membership info before navigating
   try {
-    const me = await apiGet('/auth/me'); // carries x-production-id header now
+    const me = await apiGet('/tenant/tenantauth/me'); // carries x-production-id header now
     // optional: cache to avoid flicker
     try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
   } catch (_) {
@@ -150,7 +150,7 @@ async function signIn() {
   try {
     loading.value = true;
     error.value = '';
-    const { token, user } = await apiPost('/auth/local/login', {
+    const { token, user } = await apiPost('/tenant/tenantauth/login', {
       email: email.value,
       password: password.value,
       slug: slug.value,
@@ -178,7 +178,7 @@ async function signUp() {
   try {
     loading.value = true;
     error.value = '';
-    const { token, user } = await apiPost('/auth/local/register', {
+    const { token, user } = await apiPost('/tenant/tenantauth/register', {
       email: email.value,
       password: password.value,
       name: name.value || undefined,

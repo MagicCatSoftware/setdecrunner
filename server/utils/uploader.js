@@ -6,7 +6,7 @@ import fsp from 'fs/promises';
 
 /** Root directory for uploaded files (absolute). */
 export const UPLOAD_ROOT =
-  process.env.UPLOAD_DIR || path.resolve(process.cwd(), 'uploads'); console.log(UPLOAD_ROOT);
+  process.env.UPLOAD_DIR || path.resolve(process.cwd(), 'uploads');
 
 /** Ensure the uploads root exists on boot. */
 export async function ensureUploadRoot() {

@@ -53,7 +53,7 @@
         Members
       </RouterLink>
 
-      <!-- Show ONLY if current user is owner or in admins found in production.members -->
+      <!-- Owner or member with role=admin in Production.members -->
       <RouterLink
         v-if="showAdminUsersLink"
         class="nav__link nav__link--admin"
@@ -82,7 +82,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { useAuth, performLogout } from '../auth.js';
+import { useAuth } from '../auth.js';
 import api, { apiGet } from '../api.js';
 
 const router = useRouter();
@@ -96,115 +96,129 @@ const props = defineProps({
 
 const slug = computed(() => String(route.params.slug || ''));
 
-/* ---------------- read user (prop or localStorage) ---------------- */
+/* ---------------- user ---------------- */
 const user = computed(() => {
   if (props.me) return props.me;
   try { return JSON.parse(localStorage.getItem('user') || 'null'); }
   catch { return null; }
 });
 const currentUserId = computed(() => toId(user.value?._id || user.value));
+const currentUserEmail = computed(() => (user.value?.email || '').trim().toLowerCase());
 
-/* ---------------- production fetch (to inspect members/roles) ---------------- */
-const prod = ref(null); // {_id, ownerUserId|owner, title, members:[{user,role}|ObjectId] }
-const HEX24_RE = /^[a-f0-9]{24}$/i;
+/* ---------------- production ---------------- */
+const prod = ref(null); // {_id, ownerUserId|owner, title, members:[{user,email,role}] }
+const resolvedProdId = ref(localStorage.getItem('currentProductionId') || '');
 
+const HEX24 = /^[a-f0-9]{24}$/i;
 function toId(v) {
   if (!v) return '';
   if (typeof v === 'string' || typeof v === 'number') {
     const s = String(v).trim();
-    return HEX24_RE.test(s) ? s : '';
+    return HEX24.test(s) ? s : '';
   }
   if (Array.isArray(v)) return toId(v[0]);
   const nested = v._id ?? v.user ?? v.id ?? v.userId ?? v.uid ?? v.$oid ?? (typeof v.valueOf === 'function' ? v.valueOf() : null);
   if (nested && nested !== v) return toId(nested);
-  try { const s = v.toString?.(); return HEX24_RE.test(s) ? s : ''; } catch { return ''; }
+  try { const s = v.toString?.(); return HEX24.test(s) ? s : ''; } catch { return ''; }
 }
 const idsEqual = (a, b) => {
   const A = toId(a), B = toId(b);
   return !!A && !!B && A === B;
 };
 
-async function fetchProduction() {
-  if (!slug.value) { prod.value = null; return; }
-  try {
-    // Server supports fetching by slug
-    const p = await apiGet(`/tenant/productions/${slug.value}`);
-    prod.value = p || null;
+function setPid(pid) {
+  const v = String(pid || '').trim();
+  if (!HEX24.test(v)) return;
+  resolvedProdId.value = v;
+  localStorage.setItem('currentProductionId', v);
+  if (typeof api.setProductionId === 'function') api.setProductionId(v);
+}
+function pidHeader() {
+  const v = String(resolvedProdId.value || '').trim();
+  return HEX24.test(v) ? { 'X-Production-Id': v } : {};
+}
 
-    // Keep both storage and API helper in sync so subsequent calls carry the header
+/** Resolve PID early: query → storage → public by-slug */
+async function resolvePid() {
+  // Query (?pid, ?productionId, ?production_id)
+  const sp = new URLSearchParams(window.location.search || '');
+  const qp = sp.get('pid') || sp.get('productionId') || sp.get('production_id');
+  if (qp && HEX24.test(qp)) { setPid(qp); return; }
+
+  // Storage
+  const stored = localStorage.getItem('currentProductionId') || '';
+  if (HEX24.test(stored)) { setPid(stored); return; }
+
+  // Public resolver
+  if (!slug.value) return;
+  try {
+    const p = await apiGet(`/productions/by-slug/${encodeURIComponent(slug.value)}`);
     const pid = toId(p?._id);
-    if (pid) {
-      localStorage.setItem('currentProductionId', pid);
-      api.setProductionId(pid);
-    }
+    if (pid) setPid(pid);
+  } catch { /* ignore */ }
+}
+
+/** Load tenant production doc (needs X-Production-Id header) */
+async function fetchProduction() {
+  // ensure PID first
+  if (!HEX24.test(resolvedProdId.value)) await resolvePid();
+  if (!slug.value || !HEX24.test(resolvedProdId.value)) { prod.value = null; return; }
+  try {
+    const p = await apiGet(`/tenant/productions/${slug.value}`, { headers: pidHeader() });
+    prod.value = p || null;
+    // keep PID synced (in case server returns a different/normalized id)
+    const pid = toId(p?._id);
+    if (pid) setPid(pid);
   } catch {
     prod.value = null;
   }
 }
 watch(() => slug.value, fetchProduction);
 
-/* ---------------- derive admin set from members ---------------- */
-function roleIsAdmin(r) {
-  if (!r) return false;
-  const s = String(r).trim().toLowerCase();
-  // be generous with common admin strings
-  return s === 'admin' || s === 'administrator' || s === 'owner';
-}
-
-// list of admin userIds from members (role=admin) + owner as admin
-const productionAdminIds = computed(() => {
-  const out = new Set();
-  const p = prod.value || {};
-  const ownerId = toId(p.ownerUserId ?? p.owner);
-  if (ownerId) out.add(ownerId);
-
-  const members = Array.isArray(p.members) ? p.members : [];
-  for (const m of members) {
-    // m can be ObjectId or object { user, role } or { _id, role }
-    const uid = toId(m?.user ?? m?._id ?? m);
-    const role = (m && typeof m === 'object')
-      ? (m.role ?? (Array.isArray(m.roles) ? m.roles.find(roleIsAdmin) : null))
-      : null;
-
-    if (uid && roleIsAdmin(role)) out.add(uid);
-  }
-  return out;
-});
-
+/* ---------------- role checks (owner/admin via Production.members) ---------------- */
 const isOwner = computed(() => {
   const ownerId = toId(prod.value?.ownerUserId ?? prod.value?.owner);
   return !!ownerId && idsEqual(ownerId, currentUserId.value);
 });
-const isCurrentUserAdmin = computed(() => {
+
+function roleIsAdmin(r) {
+  if (!r) return false;
+  const s = String(r).trim().toLowerCase();
+  return s === 'admin' || s === 'administrator' || s === 'owner';
+}
+
+/** admin in members if:
+ *  - member.user matches current user id, role=admin
+ *  - OR member.email matches current user email, role=admin
+ */
+const isMemberAdminForMe = computed(() => {
+  const members = Array.isArray(prod.value?.members) ? prod.value.members : [];
   const myId = currentUserId.value;
-  if (!myId) return false;
-  return productionAdminIds.value.has(myId);
+  const myEmail = currentUserEmail.value;
+  for (const m of members) {
+    const mUser = toId(m?.user ?? m?._id ?? m);
+    const mEmail = (m?.email || '').trim().toLowerCase();
+    if ((mUser && myId && mUser === myId) || (mEmail && myEmail && mEmail === myEmail)) {
+      if (roleIsAdmin(m?.role)) return true;
+    }
+  }
+  return false;
 });
 
-// This one is exactly what you asked for: if current user is in the
-// admin set derived from production.members (or is owner), show the link.
-const showAdminUsersLink = computed(() => isOwner.value || isCurrentUserAdmin.value);
-
-// Keep the other links using the same admin logic
+const showAdminUsersLink = computed(() => isOwner.value || isMemberAdminForMe.value);
 const currentProdId = computed(() => toId(prod.value?._id));
-const canEditCurrent = computed(() => isOwner.value || isCurrentUserAdmin.value);
-const canCreateProduction = computed(() => isOwner.value || isCurrentUserAdmin.value);
-const showMembersLink    = computed(() => canEditCurrent.value);
+const canEditCurrent = computed(() => isOwner.value || isMemberAdminForMe.value);
+const canCreateProduction = computed(() => isOwner.value || isMemberAdminForMe.value);
+const showMembersLink = computed(() => canEditCurrent.value);
 
-/* ---------------- presentation helpers ---------------- */
+/* ---------------- presentation ---------------- */
 const productionLabel = computed(() => {
   const p = prod.value || {};
-  return (
-    p.title ||
-    props.company?.companyProduction ||
-    (slug.value ? `/${slug.value}` : '')
-  );
+  return p.title || (slug.value ? `/${slug.value}` : '');
 });
 const productionTooltip = computed(() => {
   const p = prod.value || {};
-  const lines = [];
-  if (p.title) lines.push(`Title: ${p.title}`);
-  return lines.join('\n') || '';
+  return p.title ? `Title: ${p.title}` : '';
 });
 
 const displayName = computed(() =>
@@ -215,7 +229,6 @@ const displayName = computed(() =>
   ''
 );
 
-// Profile photo normalization
 const rawPhoto = computed(() => {
   const u = user.value || {};
   return (
@@ -252,19 +265,15 @@ const photoSrc = computed(() => normalizePhoto(rawPhoto.value));
 
 /* ---------------- actions ---------------- */
 async function onLogoutClick() {
-  try {
-    await auth.logout({ clearTenant: true });
-  } catch {
-    // ignore
-  } finally {
-    const s = slug.value || '';
-    router.replace({ name: 'tenant-login', params: { slug: s } });
-  }
+  try { await auth.logout({ clearTenant: true }); } catch {}
+  const s = slug.value || '';
+  router.replace({ name: 'tenant-login', params: { slug: s } });
 }
 
 /* ---------------- lifecycle ---------------- */
 onMounted(fetchProduction);
 </script>
+
 
 
 

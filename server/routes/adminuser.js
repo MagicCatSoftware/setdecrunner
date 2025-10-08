@@ -1,20 +1,32 @@
 // server/routes/adminUsers.js
 import { Router } from 'express';
-import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
+
 import User from '../models/User.js';
 import Production from '../models/Production.js';
-import { authRequired, requireRole } from '../middleware/auth.js';
-import { requireMembership } from '../middleware/requireMembership.js';
-import mailer from '../utils/mailer.js';
+import { authRequired } from '../middleware/auth.js';
 
 const router = Router();
-const CLIENT_BASE = process.env.CLIENT_URL || 'http://localhost:5173';
 
-const allowedRoles = new Set(['admin', 'coordinator', 'driver', 'user']);
+const HEX24 = /^[a-f0-9]{24}$/i;
+const isHex24 = (s) => HEX24.test(String(s || ''));
+const lc = (s) => String(s || '').trim().toLowerCase();
+const allowedRoles = new Set(['admin', 'editor', 'viewer', 'coordinator', 'driver', 'user']);
 
-function getProdIdOrThrow(req) {
-  const v = String(req.headers['x-production-id'] || '').trim();
+function toId(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return isHex24(v) ? v : '';
+  try { const s = v?.toString?.(); return isHex24(s) ? s : ''; } catch { return ''; }
+}
+
+function readProdIdFromReq(req) {
+  return String(req?.headers?.['x-production-id'] ?? '').trim();
+}
+
+/** Accepts the req object OR a raw string id */
+function getProdIdOrThrow(arg) {
+  const v = typeof arg === 'string' ? String(arg).trim() : readProdIdFromReq(arg);
   if (!v) {
     const err = new Error('Missing X-Production-Id header');
     err.status = 400;
@@ -28,75 +40,118 @@ function getProdIdOrThrow(req) {
   return v;
 }
 
+/** IMPORTANT: project the FULL members array */
 async function getProductionOrThrow(prodId) {
   const prod = await Production.findById(prodId)
-    .select('_id name title slug owner ownerUserId members')
+    .select('_id slug title name ownerUserId owner members') // ⬅ include members entirely
     .lean();
   if (!prod) {
     const err = new Error(`Unknown production id: ${prodId}`);
     err.status = 400;
     throw err;
   }
+  if (!Array.isArray(prod.members)) prod.members = [];
   return prod;
 }
 
-function toId(v) {
-  if (!v) return '';
-  if (typeof v === 'string') return mongoose.isValidObjectId(v) ? v : '';
-  try { const s = v?.toString?.(); return mongoose.isValidObjectId(s) ? s : ''; } catch { return ''; }
+function isOwnerUserId(prod, userId) {
+  const owner = toId(prod.ownerUserId || prod.owner);
+  return !!owner && owner === toId(userId);
 }
-
 function isOwnerOrAdminOf(prod, userId) {
   const me = toId(userId);
   if (!me || !prod) return false;
-  const owner = toId(prod.ownerUserId || prod.owner);
-  if (owner && owner === me) return true;
-  return (prod.members || []).some(m => toId(m?.user) === me && String(m?.role).toLowerCase() === 'admin');
+  if (isOwnerUserId(prod, me)) return true;
+  return (prod.members || []).some(
+    (m) => toId(m?.user) === me && String(m?.role || '').toLowerCase() === 'admin'
+  );
+}
+function isOwnerMember(prod, member) {
+  return member?.user && isOwnerUserId(prod, member.user);
+}
+function assertRoleValid(role) {
+  const r = String(role || '').toLowerCase();
+  return allowedRoles.has(r) ? r : null;
+}
+function findMemberByAnyId(prod, memberId) {
+  const mid = toId(memberId);
+  if (!mid) return null;
+  const byMemberId = (prod.members || []).find(m => isHex24(m?._id) && String(m._id) === mid);
+  if (byMemberId) return byMemberId;
+  const byUserId = (prod.members || []).find(m => isHex24(m?.user) && String(m.user) === mid);
+  return byUserId || null;
 }
 
-async function assertAdminForProduction(req, prodId) {
-  const prod = await getProductionOrThrow(prodId);
-  if (!isOwnerOrAdminOf(prod, req.user?._id)) {
-    const err = new Error('Not authorized for this production');
-    err.status = 403;
-    throw err;
+/* ---------------- requireTenantAdmin (owner or admin) ---------------- */
+async function requireTenantAdmin(req, res, next) {
+  try {
+    if (!req.user) {
+      const err = new Error('Unauthorized'); err.status = 401; throw err;
+    }
+    const prodId = getProdIdOrThrow(req);
+    // Make sure this guard loads the FULL members array
+    const prod = await getProductionOrThrow(prodId);
+
+    if (!isOwnerOrAdminOf(prod, req.user?._id)) {
+      const err = new Error('Admins only for this production');
+      err.status = 403; throw err;
+    }
+
+    req.productionId = prodId;
+    req.production = prod; // already includes members
+    next();
+  } catch (e) {
+    const code = e.status || 500;
+    if (code >= 500) console.error('[requireTenantAdmin]', e);
+    res.status(code).json({ error: e.message || 'Forbidden' });
   }
-  return prod;
 }
 
 /* =========================================================================
    GET /tenant/admin/users
-   Returns ONLY members of this production (role from Production.members).
-   Supports ?q= for name/email filtering.
+   Returns { owner, members[] }
    ========================================================================= */
 router.get(
   '/users',
   authRequired,
-  requireMembership,
+  requireTenantAdmin,
   async (req, res) => {
     try {
-      const prodId = getProdIdOrThrow(req);
-      const prod = await assertAdminForProduction(req, prodId);
-
-      const { q } = req.query || {};
-      const memberDocs = Array.isArray(prod.members) ? prod.members : [];
-      const memberIds = memberDocs.map(m => m?.user).filter(Boolean);
-      if (!memberIds.length) return res.json([]);
-
-      const users = await User.find({ _id: { $in: memberIds } })
-        .select('_id email name provider oauthProvider siteAuthorized banned createdAt updatedAt photo productionIds')
-        .lean();
-
-      const roleMap = new Map(memberDocs.map(m => [String(m.user), m.role]));
-      let out = users.map(u => ({ ...u, role: roleMap.get(String(u._id)) || 'user' }));
-
-      if (q && String(q).trim()) {
-        const needle = String(q).trim().toLowerCase();
-        out = out.filter(u => (u.name || '').toLowerCase().includes(needle) || (u.email || '').toLowerCase().includes(needle));
+      // Use the cached production, but re-fetch with full projection if needed
+      let prod = req.production;
+      if (!prod || !Array.isArray(prod.members)) {
+        const pid = req.productionId || getProdIdOrThrow(req);
+        prod = await getProductionOrThrow(pid);
       }
 
-      out.sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
-      res.json(out);
+      // Owner (from User collection)
+      let owner = null;
+      const ownerId = toId(prod.ownerUserId || prod.owner);
+      if (ownerId) {
+        const u = await User.findById(ownerId).select('_id email name').lean();
+        if (u) owner = { id: String(u._id), email: u.email, name: u.name || '' };
+      }
+
+      // Members from Production.members (no extra queries)
+      const { q } = req.query || {};
+      const needle = q && String(q).trim().toLowerCase();
+
+      let members = (prod.members || []).map((m) => ({
+        _id: m._id || m.id || null,
+        user: m.user || null,                              // may be null if you didn’t store it
+        email: m.email || '',
+        role: m.role || 'user',
+        siteAuthorized: !!m.siteAuthorized,
+        addedAt: m.addedAt || null,
+      }));
+
+      if (needle) {
+        members = members.filter(m => (m.email || '').toLowerCase().includes(needle));
+      }
+
+      members.sort((a, b) => (a.email || '').localeCompare(b.email || ''));
+
+      return res.json({ owner, members });
     } catch (e) {
       const code = e.status || 500;
       if (code >= 500) console.error('[GET /tenant/admin/users]', e);
@@ -107,249 +162,228 @@ router.get(
 
 /* =========================================================================
    POST /tenant/admin/users
-   Upsert user + ensure membership (role), set flags, issue reset token, email.
-   Body: { email, firstName?, lastName?, name?, username?, role?, siteAuthorized?, banned? }
    ========================================================================= */
 router.post(
   '/users',
   authRequired,
-  requireMembership,
-  requireRole('admin'),
+  requireTenantAdmin,
   async (req, res) => {
     try {
-      const prodId = getProdIdOrThrow(req);
-      const prod = await assertAdminForProduction(req, prodId);
+      const prod = req.production || await getProductionOrThrow(getProdIdOrThrow(req));
+      const prodId = String(prod._id);
 
-      const {
-        email,
-        firstName,
-        lastName,
-        name,
-        username,
-        role = 'user',
-        siteAuthorized,
-        banned,
-      } = req.body || {};
+      const { userId, email, role, tempPassword, siteAuthorized } = req.body || {};
+      const emailLC = lc(email || '');
+      if (!emailLC) return res.status(400).json({ error: 'email is required' });
 
-      if (!email) return res.status(400).json({ error: 'Email is required' });
-
-      const emailLC = String(email).toLowerCase().trim();
-      const displayName =
-        (name && String(name).trim()) ||
-        [firstName, lastName].filter(Boolean).join(' ').trim() ||
-        undefined;
-
-      const roleSafe = allowedRoles.has(String(role)) ? String(role) : 'user';
-
-      // Upsert user
-      let user = await User.findOne({ email: emailLC });
-      if (!user) {
-        user = new User({
-          provider: 'local',
-          email: emailLC,
-          name: displayName,
-          username: username ? String(username).toLowerCase().trim() : undefined,
-          mustChangePassword: true,
-          verified: false,
-        });
-      } else {
-        if (displayName !== undefined) user.name = displayName;
-        if (username !== undefined) {
-          const u = String(username || '').trim();
-          if (u) user.username = u.toLowerCase();
+      // Owner email cannot be added as member
+      const ownerId = toId(prod.ownerUserId || prod.owner);
+      if (ownerId) {
+        const ownerUser = await User.findById(ownerId).select('_id email').lean();
+        if (ownerUser && lc(ownerUser.email) === emailLC) {
+          return res.status(409).json({ error: 'Owner cannot be added as a member' });
         }
-        if (!user.passwordHash) user.mustChangePassword = true;
       }
 
-      if (siteAuthorized !== undefined) user.siteAuthorized = !!siteAuthorized;
-      if (banned !== undefined) user.banned = !!banned;
+      // Prevent duplicate emails in members
+      const dup = (prod.members || []).find((m) => lc(m?.email) === emailLC);
+      if (dup) return res.status(409).json({ error: 'Member with this email already exists' });
 
-      // Ensure user.productionIds contains prodId
-      const set = new Set([...(user.productionIds || []).map(String), String(prodId)]);
-      user.productionIds = Array.from(set);
+      // Ensure backing User doc (optional, if you store user ref)
+      let backingUserId = '';
+      if (userId && isHex24(userId)) {
+        backingUserId = userId;
+      } else {
+        const existing = await User.findOne({ email: emailLC }).select('_id productionIds').lean();
+        if (existing) {
+          backingUserId = String(existing._id);
+          if (!((existing.productionIds || []).map(String).includes(prodId))) {
+            await User.updateOne({ _id: existing._id }, { $addToSet: { productionIds: prodId } });
+          }
+        } else {
+          const created = await User.create({ email: emailLC, productionIds: [prodId] });
+          backingUserId = String(created._id);
+        }
+      }
 
-      // Ensure membership exists with the right role
-      const matched = await Production.updateOne(
-        { _id: prodId, 'members.user': user._id },
-        { $set: { 'members.$.role': roleSafe } }
+      const roleSafe = assertRoleValid(role) || 'user';
+      const memberDoc = {
+        user: backingUserId || undefined,
+        role: roleSafe,
+        siteAuthorized: !!siteAuthorized,
+        email: emailLC,
+        addedAt: new Date(),
+      };
+
+      if (tempPassword) {
+        if (String(tempPassword).length < 8) {
+          return res.status(400).json({ error: 'Temp password must be at least 8 characters' });
+        }
+        memberDoc.passwordHash = await bcrypt.hash(String(tempPassword), 10);
+      }
+
+      await Production.updateOne(
+        { _id: prodId, 'members.email': { $ne: emailLC } },
+        { $push: { members: memberDoc } },
+        { strict: false }
       );
-      if (matched.matchedCount === 0) {
-        await Production.updateOne(
-          { _id: prodId, 'members.user': { $ne: user._id } },
-          { $addToSet: { members: { user: user._id, role: roleSafe } } }
-        );
-      }
 
-      // Issue one-time reset token
-      const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      user.resetTokenHash = tokenHash;
-      user.resetExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await user.save();
+      const refreshed = await Production.findOne(
+        { _id: prodId, 'members.email': emailLC },
+        { 'members.$': 1 }
+      ).lean();
+      const createdMember = refreshed?.members?.[0];
 
-      // Build invite link WITH production slug + post-reset redirect
-      const slug = String(prod.slug || '').trim();
-      const rAfter = slug ? `/${encodeURIComponent(slug)}/login` : '/login';
-      const link = `${CLIENT_BASE}/set-password?token=${encodeURIComponent(rawToken)}${
-        slug ? `&slug=${encodeURIComponent(slug)}` : ''
-      }&r=${encodeURIComponent(rAfter)}`;
-
-      try {
-        await mailer.sendMail({
-          to: user.email,
-          from: process.env.MAIL_FROM || process.env.MAIL_USER,
-          subject: `You're invited to ${prod.name || prod.title || 'Set-Dec Runner'}`,
-          text: `Hi ${displayName || ''},
-
-You've been granted access to ${prod.name || prod.title || 'Set-Dec Runner'}${slug ? ` (/${slug})` : ''}.
-Click the link below to set your password:
-${link}
-
-After setting your password, you'll be taken to the login page for this production.
-This link expires in 24 hours.`,
-          html: `
-            <div style="font-family:Arial,sans-serif;line-height:1.5">
-              <p>Hi ${displayName || ''},</p>
-              <p>You've been granted access to <b>${prod.name || prod.title || 'Set-Dec Runner'}</b>${
-                slug ? ` (<code>/${slug}</code>)` : ''
-              }.</p>
-              <p>
-                <a href="${link}" style="background:#111;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;display:inline-block">
-                  Set your password
-                </a>
-              </p>
-              <p>If the button doesn't work, copy &amp; paste this link:<br>
-                <a href="${link}">${link}</a>
-              </p>
-              <p>After setting your password, you'll be taken to the login page for this production.</p>
-              <p><i>This link expires in 24 hours.</i></p>
-            </div>
-          `,
-        });
-      } catch (mailErr) {
-        console.error('[adminUsers] Email send failed:', mailErr);
-        console.warn('[adminUsers] Invite link (copy manually):', link);
-      }
-
-      res.json({ ok: true, userId: user._id, productionId: String(prodId), slug });
+      return res.status(201).json({
+        ok: true,
+        member: {
+          _id: createdMember?._id || null,
+          user: createdMember?.user || backingUserId || null,
+          email: createdMember?.email || emailLC,
+          role: createdMember?.role || roleSafe,
+          siteAuthorized: !!createdMember?.siteAuthorized,
+          addedAt: createdMember?.addedAt || null,
+        },
+      });
     } catch (e) {
       const code = e.status || 500;
       if (code >= 500) console.error('[POST /tenant/admin/users]', e);
-      res.status(code).json({ error: e.message || 'Failed to create user' });
+      res.status(code).json({ error: e.message || 'Failed to add member' });
     }
   }
 );
 
 /* =========================================================================
    PATCH /tenant/admin/users/:id
-   Update user flags and/or the member role for THIS production.
    ========================================================================= */
 router.patch(
   '/users/:id',
   authRequired,
-  requireMembership,
-  requireRole('admin'),
+  requireTenantAdmin,
   async (req, res) => {
     try {
-      const prodId = getProdIdOrThrow(req);
-      await assertAdminForProduction(req, prodId);
+      const prod = req.production || await getProductionOrThrow(getProdIdOrThrow(req));
+      const prodId = String(prod._id);
 
-      const userId = req.params.id;
-      if (!mongoose.isValidObjectId(userId)) {
-        return res.status(400).json({ error: 'Invalid user id' });
+      const memberId = req.params.id;
+      if (!isHex24(memberId)) return res.status(400).json({ error: 'Invalid member id' });
+
+      const current = findMemberByAnyId(prod, memberId);
+      if (!current || !current._id) return res.status(404).json({ error: 'Member not found' });
+
+      if (isOwnerMember(prod, current)) {
+        return res.status(403).json({ error: 'Owner cannot be modified' });
       }
 
-      const target = await User.findById(userId);
-      if (!target) return res.status(404).json({ error: 'User not found' });
+      const updates = {};
+      const { email, role, siteAuthorized, newPassword } = req.body || {};
 
-      const body = req.body || {};
-      const uUpdate = {};
-      const wantsRole = body.role !== undefined;
-
-      if (body.siteAuthorized !== undefined) uUpdate.siteAuthorized = !!body.siteAuthorized;
-      if (body.banned !== undefined) uUpdate.banned = !!body.banned;
-      if (Object.keys(uUpdate).length) {
-        await User.updateOne({ _id: target._id }, { $set: uUpdate });
-      }
-
-      if (wantsRole) {
-        const newRole = String(body.role).toLowerCase();
-        if (!allowedRoles.has(newRole)) {
-          return res.status(400).json({ error: 'Invalid role' });
-        }
-        const upd = await Production.updateOne(
-          { _id: prodId, 'members.user': target._id },
-          { $set: { 'members.$.role': newRole } }
+      if (email !== undefined) {
+        const emailLC = lc(email);
+        if (!emailLC) return res.status(400).json({ error: 'email cannot be empty' });
+        const dup = (prod.members || []).find(
+          (m) => String(m._id) !== String(current._id) && lc(m?.email) === emailLC
         );
-        if (upd.matchedCount === 0) {
-          await Production.updateOne(
-            { _id: prodId, 'members.user': { $ne: target._id } },
-            { $addToSet: { members: { user: target._id, role: newRole } } }
-          );
-          await User.updateOne(
-            { _id: target._id },
-            { $addToSet: { productionIds: prodId } }
-          );
-        }
+        if (dup) return res.status(409).json({ error: 'Another member already uses this email' });
+        updates['members.$.email'] = emailLC;
       }
 
-      const freshUser = await User.findById(target._id)
-        .select('_id email name provider oauthProvider siteAuthorized banned createdAt updatedAt photo productionIds')
-        .lean();
-      const refreshedProd = await Production.findOne(
-        { _id: prodId, 'members.user': target._id },
+      if (role !== undefined) {
+        const safe = assertRoleValid(role);
+        if (!safe) return res.status(400).json({ error: 'Invalid role' });
+        updates['members.$.role'] = safe;
+      }
+
+      if (siteAuthorized !== undefined) {
+        updates['members.$.siteAuthorized'] = !!siteAuthorized;
+      }
+
+      if (newPassword) {
+        if (String(newPassword).length < 8) {
+          return res.status(400).json({ error: 'New password must be at least 8 characters' });
+        }
+        updates['members.$.passwordHash'] = await bcrypt.hash(String(newPassword), 10);
+      }
+
+      if (!Object.keys(updates).length) {
+        return res.json({ ok: true, unchanged: true });
+      }
+
+      await Production.updateOne(
+        { _id: prodId, 'members._id': current._id },
+        { $set: updates },
+        { strict: false }
+      );
+
+      const fresh = await Production.findOne(
+        { _id: prodId, 'members._id': current._id },
         { 'members.$': 1 }
       ).lean();
+      const m = fresh?.members?.[0] || null;
 
-      const role = refreshedProd?.members?.[0]?.role || 'user';
-      res.json({ ...freshUser, role });
+      return res.json({
+        ok: true,
+        member: m
+          ? {
+              _id: m._id || null,
+              user: m.user || null,
+              email: m.email || '',
+              role: m.role || 'user',
+              siteAuthorized: !!m.siteAuthorized,
+              addedAt: m.addedAt || null,
+            }
+          : null,
+      });
     } catch (e) {
       const code = e.status || 500;
       if (code >= 500) console.error('[PATCH /tenant/admin/users/:id]', e);
-      res.status(code).json({ error: e.message || 'Failed to update user' });
+      res.status(code).json({ error: e.message || 'Failed to update member' });
     }
   }
 );
 
 /* =========================================================================
    DELETE /tenant/admin/users/:id
-   Remove membership from THIS production and pull prodId from user.productionIds.
    ========================================================================= */
 router.delete(
   '/users/:id',
   authRequired,
-  requireMembership,
-  requireRole('admin'),
+  requireTenantAdmin,
   async (req, res) => {
     try {
-      const prodId = getProdIdOrThrow(req);
-      await assertAdminForProduction(req, prodId);
+      const prod = req.production || await getProductionOrThrow(getProdIdOrThrow(req));
+      const prodId = String(prod._id);
 
-      const userId = req.params.id;
-      if (!mongoose.isValidObjectId(userId)) {
-        return res.status(400).json({ error: 'Invalid user id' });
+      const memberId = req.params.id;
+      if (!isHex24(memberId)) return res.status(400).json({ error: 'Invalid member id' });
+
+      const current = findMemberByAnyId(prod, memberId);
+      if (!current || !current._id) return res.status(404).json({ error: 'Member not found' });
+
+      if (isOwnerMember(prod, current)) {
+        return res.status(403).json({ error: 'Owner cannot be deleted' });
       }
-
-      const target = await User.findById(userId);
-      if (!target) return res.status(404).json({ error: 'User not found' });
 
       await Production.updateOne(
         { _id: prodId },
-        { $pull: { members: { user: target._id } } }
-      );
-      await User.updateOne(
-        { _id: target._id },
-        { $pull: { productionIds: prodId } }
+        { $pull: { members: { _id: current._id } } }
       );
 
-      res.json({ ok: true });
+      if (current.user) {
+        await User.updateOne({ _id: current.user }, { $pull: { productionIds: prodId } });
+      }
+
+      return res.json({ ok: true });
     } catch (e) {
       const code = e.status || 500;
       if (code >= 500) console.error('[DELETE /tenant/admin/users/:id]', e);
-      res.status(code).json({ error: e.message || 'Failed to remove user' });
+      res.status(code).json({ error: e.message || 'Failed to remove member' });
     }
   }
 );
 
 export default router;
+
+
+
 

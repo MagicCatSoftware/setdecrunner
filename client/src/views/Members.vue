@@ -226,7 +226,7 @@ function isOwner(u) {
 async function checkAccess() {
   try {
     const [meRes, prodRes] = await Promise.all([
-      apiGet('/auth/me'),
+      apiGet('/tenant/tenantauth/me'),
       apiGet(`/tenant/productions/${slug.value}`)
     ]);
 
