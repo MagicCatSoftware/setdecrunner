@@ -113,8 +113,6 @@ async function requireTenantAdmin(req, res, next) {
    ========================================================================= */
 router.get(
   '/users',
-  authRequired,
-  requireTenantAdmin,
   async (req, res) => {
     try {
       // Use the cached production, but re-fetch with full projection if needed
@@ -165,8 +163,6 @@ router.get(
    ========================================================================= */
 router.post(
   '/users',
-  authRequired,
-  requireTenantAdmin,
   async (req, res) => {
     try {
       const prod = req.production || await getProductionOrThrow(getProdIdOrThrow(req));
@@ -258,8 +254,6 @@ router.post(
    ========================================================================= */
 router.patch(
   '/users/:id',
-  authRequired,
-  requireTenantAdmin,
   async (req, res) => {
     try {
       const prod = req.production || await getProductionOrThrow(getProdIdOrThrow(req));
@@ -347,8 +341,6 @@ router.patch(
    ========================================================================= */
 router.delete(
   '/users/:id',
-  authRequired,
-  requireTenantAdmin,
   async (req, res) => {
     try {
       const prod = req.production || await getProductionOrThrow(getProdIdOrThrow(req));

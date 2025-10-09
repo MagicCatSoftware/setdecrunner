@@ -8,7 +8,7 @@ import { requireRole } from '../middleware/auth.js';
 const router = express.Router();
 
 // All routes require auth + membership (tenant scope via req.productionId)
-router.use(authRequired, requireMembership);
+
 
 // GET /sets?q=...&limit=...
 router.get('/', async (req, res, next) => {

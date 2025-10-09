@@ -182,6 +182,7 @@ async function signUp() {
       email: email.value,
       password: password.value,
       name: name.value || undefined,
+      slug: slug.value,
     });
 
     auth.setToken(token);

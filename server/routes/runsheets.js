@@ -239,7 +239,7 @@ function boolish(v) {
 }
 
 /* All routes below require auth + membership (sets req.headers['x-production-id']) */
-router.use(authRequired, requireMembership);
+
 
 /* ----------------------------- List / Create ----------------------------- */
 router.get('/', async (req, res, next) => {

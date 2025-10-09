@@ -50,7 +50,7 @@ export async function requireMembership(req, res, next) {
       // reflect the resolved id so downstream middleware/handlers can read it if they rely on the header
       req.headers['x-production-id'] = prodId;
     }
-
+    
     // 3) Must be authenticated (authRequired should run before this)
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized' });

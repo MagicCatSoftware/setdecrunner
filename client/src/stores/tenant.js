@@ -105,7 +105,7 @@ export const useTenant = defineStore('tenant', {
     async resolveBySlug(slug) {
       this.loading = true; this.error = '';
       try {
-        const { data } = await this._api().get(`/tenant/resolve/${encodeURIComponent(slug)}`);
+        const { data } = await this._api().get(`/tenant/tenantauth/resolve/${encodeURIComponent(slug)}`);
         // Expect: { productionId, title? }
         if (!data?.productionId) throw new Error('Resolution failed');
         this.productionId = data.productionId;
@@ -125,7 +125,7 @@ export const useTenant = defineStore('tenant', {
       if (!this.productionId) throw new Error('No production selected');
       this.loading = true; this.error = '';
       try {
-        const { data } = await this._api().post('/tenant/login', {
+        const { data } = await this._api().post('/tenant/tenantauth/login', {
           productionId: this.productionId, email, password,
         });
         // Expect: { token, kind, role? }
@@ -146,7 +146,7 @@ export const useTenant = defineStore('tenant', {
       if (!this.tenantToken) return null;
       this.loading = true; this.error = '';
       try {
-        const { data } = await this._api().get('/tenant/me');
+        const { data } = await this._api().get('/tenant/tenantauth/me');
         // Expect: { prodId, kind, role, ok: true }
         this.kind = data.kind || this.kind;
         this.role = data.role || this.role;
@@ -168,7 +168,7 @@ export const useTenant = defineStore('tenant', {
       if (!this.tenantToken) throw new Error('Not logged in');
       this.loading = true; this.error = '';
       try {
-        const { data } = await this._api().post('/tenant/password', { oldPassword, newPassword });
+        const { data } = await this._api().post('/tenant/tenantauth/password', { oldPassword, newPassword });
         return data?.ok === true;
       } catch (e) {
         this.error = e?.response?.data?.error || e.message || 'Password change failed';

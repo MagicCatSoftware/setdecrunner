@@ -60,7 +60,7 @@ function sanitizePatchPayload(body = {}) {
 }
 
 /* All endpoints require auth + tenant membership */
-router.use(authRequired, requireMembership);
+
 
 /* ------------------------------- CREATE ------------------------------- */
 router.post('/', async (req, res) => {

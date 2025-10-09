@@ -33,11 +33,13 @@ import runsheetHandRouter from './routes/runsheetHand.js';
 import { authRequired, issueJwt } from './middleware/auth.js';
 import { requireMembership } from './middleware/requireMembership.js';
 
+
 // Optional services and extra routes
 import { ensureTempAccountAndInvite } from './services/users.js'; // OK if unused
 import ocrRouter from './routes/ocr.js';
 import ownerRoutes from './routes/owner.js';
 import tenantAuthRouter from './routes/tenantAuth.js';
+import {tenantGate} from './middleware/tenantAuth.js';
 
 const app = express();
 
@@ -688,19 +690,19 @@ app.get('/tenant/productions/by_slug/:slug', async (req, res) => {
 });
 
 /* ----------------------------- Tenant routes ------------------------------ */
-const tenantMw = [authRequired, requireMembership];
-app.use('/tenant/productions', tenantMw, productionRoutes);
-app.use('/tenant/users', tenantMw, userRoutes);
-app.use('/tenant/runsheets', tenantMw, runsheetRoutes);
-app.use('/tenant/items', tenantMw, itemRoutes);
-app.use('/tenant/places', tenantMw, placeRoutes);
-app.use('/tenant/suppliers', tenantMw, supplierRoutes);
-app.use('/tenant/people', tenantMw, peopleRoutes);
-app.use('/tenant/admin', adminUsersRouter);
-app.use('/tenant/sets', tenantMw, setRoutes);
+
+app.use('/tenant/productions',tenantGate({ authorized: true, admin: false }), productionRoutes);
+app.use('/tenant/users',tenantGate({ authorized: true, admin: true }), userRoutes);
+app.use('/tenant/runsheets',tenantGate({ authorized: true, admin: false }),runsheetRoutes);
+app.use('/tenant/items',tenantGate({ authorized: true, admin: false }), itemRoutes);
+app.use('/tenant/places',tenantGate({ authorized: true, admin: false }),placeRoutes);
+app.use('/tenant/suppliers',tenantGate({ authorized: true, admin: false }),supplierRoutes);
+app.use('/tenant/people',tenantGate({ authorized: true, admin: false }), peopleRoutes);
+app.use('/tenant/admin',tenantGate({ authorized: true, admin: true }), adminUsersRouter);
+app.use('/tenant/sets', tenantGate({ authorized: true, admin: false }), setRoutes);
 
 // Misc tenant endpoints
-app.use('/tenant', tenantMw, tenantRouter);
+app.use('/tenant',tenantGate({ authorized: true, admin: true }), tenantRouter);
 
 /* --------------------------------- Boot --------------------------------- */
 const PORT = process.env.PORT || 4001;

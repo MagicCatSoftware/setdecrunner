@@ -74,7 +74,7 @@ const unlinkIfExists = async (abs) => {
 // Auth + tenant membership. requireMembership should:
 //  - verify the user belongs to the current production
 //  - set req.headers['x-production-id'] to that production’s ObjectId
-router.use(authRequired, requireMembership);
+
 
 // ---------------------------- List -----------------------------------------
 /**

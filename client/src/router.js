@@ -56,7 +56,7 @@ function getToken() {
 function decodeJwtPayload(t) {
   try {
     const parts = String(t).split('.');
-    if (parts.length !== 3) return null; // opaque/non-JWT
+    if (parts.length !== 3) return null;
     const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
     return JSON.parse(atob(b64 + pad));
@@ -73,27 +73,18 @@ function isAuthed() {
   }
   return true;
 }
-function userHasProduction(prodId) {
-  try {
-    const user = JSON.parse(localStorage.getItem('user') || 'null');
-    if (!user || !prodId) return false;
-    const list = user.productionIds || (user.productionId ? [user.productionId] : []);
-    return Array.isArray(list) && list.map(String).includes(String(prodId));
-  } catch { return false; }
-}
 
-/* Hard logout that never fails */
+/* Hard logout */
 function hardLogout() {
   try { softLogout?.(); } catch {}
   try {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('currentProductionId');
+    localStorage.removeItem('tenantAccessCache');
   } catch {}
   try { api.setProductionId?.(''); } catch {}
   try { api.setUnauthorizedHandler?.(null); } catch {}
-
-  // Nudge any UI listeners
   try { window.dispatchEvent(new Event('storage')); } catch {}
   try { window.dispatchEvent(new Event('focus')); } catch {}
 }
@@ -126,33 +117,81 @@ function setTokenAndNotify(token) {
   try { window.dispatchEvent(new Event('focus')); } catch {}
 }
 
-/* Resolve pid & hydrate user for a slug (de-duped) */
+/* -------------- tenant access cache (by production) -------------- */
+/**
+ * Structure:
+ * tenantAccessCache = {
+ *   "<pid>": { isMember: true, owner: boolean, role: string|null, siteAuthorized: boolean, authorized: boolean }
+ * }
+ */
+function readAccessCache() {
+  try { return JSON.parse(localStorage.getItem('tenantAccessCache') || '{}'); }
+  catch { return {}; }
+}
+function writeAccessCache(cache) {
+  try { localStorage.setItem('tenantAccessCache', JSON.stringify(cache || {})); } catch {}
+}
+function setAccessForPid(pid, info) {
+  const cache = readAccessCache();
+  cache[String(pid)] = info;
+  writeAccessCache(cache);
+}
+function getAccessForPid(pid) {
+  const cache = readAccessCache();
+  return cache[String(pid)] || null;
+}
+function hasTenantAccess(pid, { requireAuthorized = false, requireAdmin = false } = {}) {
+  const a = getAccessForPid(pid);
+  if (!a || !a.isMember) return false;
+  if (requireAuthorized && !a.authorized) return false;
+  if (requireAdmin && !(a.owner || (String(a.role || '').toLowerCase() === 'admin'))) return false;
+  return true;
+}
+
+/* ---------------- pid + tenant session hydration ---------------- */
 const _pidPromises = new Map();
-async function ensurePidAndUserForSlug(slug) {
-  const existing = localStorage.getItem('currentProductionId') || '';
-  if (existing) return existing;
+
+async function ensurePidAndAccessForSlug(slug) {
+  const storedPid = localStorage.getItem('currentProductionId') || '';
+  if (storedPid) return storedPid;
 
   if (_pidPromises.has(slug)) return _pidPromises.get(slug);
 
   const p = (async () => {
-    // 1) Resolve pid WITHOUT Authorization
+    // 1) Resolve pid PUBLICLY (no auth header)
     const prod = await apiGet(`/productions/by-slug/${encodeURIComponent(slug)}`, undefined, {
       headers: { Authorization: '' },
     });
     const pid = String(prod._id || '');
+    if (!pid) throw new Error('Production not found');
 
-    // 2) Persist + set
+    // 2) Persist + make api helper attach the header globally
     try { localStorage.setItem('lastSlug', slug); } catch {}
     try { localStorage.setItem('currentProductionId', pid); } catch {}
     try { api.setProductionId?.(pid); } catch {}
 
-    // 3) If authed, hydrate /auth/me once so membership is fresh
+    // 3) If authed, hydrate tenant session once and cache access (member/authorized/admin/owner)
     if (isAuthed()) {
       try {
-        const me = await apiGet('/auth/tenantauth/me');
-        try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
+        const me = await apiGet('/tenant/tenantauth/me', undefined, { headers: { 'X-Production-Id': pid } });
+        // me: { ok, productionId, owner, role, member:{siteAuthorized,...}, email, ... }
+        const access = {
+          isMember: true,
+          owner: !!me?.owner,
+          role: me?.role || (me?.member?.role) || 'user',
+          siteAuthorized: !!(me?.member?.siteAuthorized) || !!me?.owner,
+          authorized: !!(me?.owner || me?.member?.siteAuthorized),
+        };
+        setAccessForPid(pid, access);
+
+        // Keep legacy 'user' in localStorage broadly compatible (optional)
+        try {
+          const legacy = JSON.parse(localStorage.getItem('user') || 'null') || {};
+          const productionIds = Array.from(new Set([...(legacy.productionIds || []), pid]));
+          localStorage.setItem('user', JSON.stringify({ ...legacy, productionIds }));
+        } catch {}
       } catch {
-        // ignore; unauthorized handler will take care of redirect on next API call if needed
+        // Leave cache empty; server will 401/403 as needed later
       }
     }
     return pid;
@@ -176,19 +215,9 @@ const router = createRouter({
 
     // Owner area
     { path: '/owner/login', name: 'owner-login', component: OwnerLogin, meta: { guestOnlyOwner: true, ownerArea: true } },
-    {
-      path: '/owner/logout',
-      name: 'owner-logout',
-      beforeEnter: () => { hardLogout(); return { name: 'owner-login', replace: true }; },
-    },
+    { path: '/owner/logout', name: 'owner-logout', beforeEnter: () => { hardLogout(); return { name: 'owner-login', replace: true }; } },
     { path: '/owner', name: 'owner-home', component: OwnerDashboard, meta: { requiresAuth: true, ownerArea: true } },
-    {
-      path: '/owner/productions/:id',
-      name: 'owner-production-edit',
-      component: OwnerProductionEditor,
-      props: true,
-      meta: { requiresAuth: true, ownerArea: true },
-    },
+    { path: '/owner/productions/:id', name: 'owner-production-edit', component: OwnerProductionEditor, props: true, meta: { requiresAuth: true, ownerArea: true } },
 
     // Global logout
     {
@@ -211,7 +240,7 @@ const router = createRouter({
       async beforeEnter(to) {
         const slug = String(to.params.slug || '').toLowerCase();
         try {
-          await ensurePidAndUserForSlug(slug);
+          await ensurePidAndAccessForSlug(slug);
           enterTenantMode(router, slug, to.fullPath);
           return true;
         } catch {
@@ -220,11 +249,12 @@ const router = createRouter({
       },
       children: [
         { path: 'login', name: 'tenant-login', component: TenantLogin, meta: { guestOnlyTenant: true } },
+
         {
           path: '',
           name: 'tenant-home',
           component: Dashboard,
-          meta: { requiresAuth: true, requiresMembership: true },
+          meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true },
           beforeEnter: (to) => {
             const slug = String(to.params.slug || '');
             if (!isAuthed()) {
@@ -233,35 +263,32 @@ const router = createRouter({
             return true;
           },
         },
-        {
-          path: 'logout',
-          name: 'tenant-logout',
-          beforeEnter: (to) => {
-            const slug = String(to.params.slug || '');
-            hardLogout();
-            return { name: 'tenant-login', params: { slug }, replace: true };
-          },
-        },
 
-        // Productions
+        { path: 'logout', name: 'tenant-logout', beforeEnter: (to) => {
+          const slug = String(to.params.slug || '');
+          hardLogout();
+          return { name: 'tenant-login', params: { slug }, replace: true };
+        } },
+
+        // Productions (keep accessible but still require membership/authorization if they call tenant APIs)
         { path: 'productions', name: 'productions', component: Productions, meta: { requiresAuth: true } },
-        { path: 'productions/new', name: 'production-new', component: ProductionEditor, meta: { requiresAuth: true } },
-        { path: 'productions/:id', name: 'production-edit', component: ProductionEditor, props: true, meta: { requiresAuth: true } },
+        { path: 'productions/new', name: 'production-new', component: ProductionEditor, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'productions/:id', name: 'production-edit', component: ProductionEditor, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
         // Runsheets
-        { path: 'runsheets',            name: 'runsheets',        component: RunSheets,      meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'runsheets/new',        name: 'runsheet-new',     component: RunSheetEditor, meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'runsheets/:id',        name: 'runsheet-edit',    component: RunSheetEditor, props: true, meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'runsheets/:id/beta',   name: 'runsheet-beta',    component: RunSheetsBeta,  props: true, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'runsheets',            name: 'runsheets',        component: RunSheets,      meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'runsheets/new',        name: 'runsheet-new',     component: RunSheetEditor, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'runsheets/:id',        name: 'runsheet-edit',    component: RunSheetEditor, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'runsheets/:id/beta',   name: 'runsheet-beta',    component: RunSheetsBeta,  props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
         // Canvas
-        { path: 'runsheets/:id/by-hand', name: 'runsheet-by-hand', component: RunSheetByHand, props: true, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'runsheets/:id/by-hand', name: 'runsheet-by-hand', component: RunSheetByHand, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
         // Smart view
         {
           path: 'runsheetsview/:id',
           name: 'runsheet-view',
-          meta: { requiresAuth: true, requiresMembership: true },
+          meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true },
           async beforeEnter(to) {
             try {
               const rs = await apiGet(`/tenant/runsheets/${to.params.id}`);
@@ -275,8 +302,8 @@ const router = createRouter({
         },
 
         // Viewers
-        { path: 'runsheetsview/:id/official',     name: 'runsheet-view-official', component: RunSheetSingle, props: true, meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'runsheetsview/:id/handwritten',  name: 'runsheet-handwritten',   component: HandWrittenRunsheet, props: true, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'runsheetsview/:id/official',     name: 'runsheet-view-official', component: RunSheetSingle, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'runsheetsview/:id/handwritten',  name: 'runsheet-handwritten',   component: HandWrittenRunsheet, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
         // Shortcuts
         { path: 'runsheetsview/:id/handwritten/edit', redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } }) },
@@ -285,22 +312,24 @@ const router = createRouter({
         { path: 'runsheets/:id/edit-hand',            redirect: (to) => ({ name: 'runsheet-by-hand', params: { slug: to.params.slug, id: to.params.id } }) },
 
         // Others
-        { path: 'suppliers',     name: 'suppliers',     component: Suppliers,      meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'suppliers/new', name: 'supplier-new',  component: SupplierEditor, meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'suppliers/:id', name: 'supplier-edit', component: SupplierEditor, props: true, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'suppliers',     name: 'suppliers',     component: Suppliers,      meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'suppliers/new', name: 'supplier-new',  component: SupplierEditor, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'suppliers/:id', name: 'supplier-edit', component: SupplierEditor, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
-        { path: 'people',        name: 'people',        component: People,         meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'people/new',    name: 'person-new',    component: PeopleEditor,   meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'people/:id',    name: 'person-edit',   component: PeopleEditor,   props: true, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'people',        name: 'people',        component: People,         meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'people/new',    name: 'person-new',    component: PeopleEditor,   meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'people/:id',    name: 'person-edit',   component: PeopleEditor,   props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
-        { path: 'sets',          name: 'sets',          component: SetsList,       meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'sets/new',      name: 'set-new',       component: SetEditor,      meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'sets/:id',      name: 'set-edit',      component: SetEditor,      props: true, meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'sets',          name: 'sets',          component: SetsList,       meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'sets/new',      name: 'set-new',       component: SetEditor,      meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'sets/:id',      name: 'set-edit',      component: SetEditor,      props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
-        { path: 'driver',        name: 'driver',        component: Driver,         meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'items',         name: 'items',         component: Items,          meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'places',        name: 'places',        component: Places,         meta: { requiresAuth: true, requiresMembership: true } },
-        { path: 'adminusers',    name: 'admin-users',   component: AdminUsers,     meta: { requiresAuth: true, requiresMembership: true } },
+        { path: 'driver',        name: 'driver',        component: Driver,         meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'items',         name: 'items',         component: Items,          meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+        { path: 'places',        name: 'places',        component: Places,         meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
+
+        // Admin management (tenant)
+        { path: 'adminusers',    name: 'admin-users',   component: AdminUsers,     meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true, requiresAdmin: true } },
       ],
     },
 
@@ -310,24 +339,18 @@ const router = createRouter({
 
 /* ---------------- global guard ---------------- */
 router.beforeEach(async (to) => {
-  // 0) OAuth handoff catcher (persist ?token=… once)
+  // 0) OAuth handoff catcher (?token=…)
   const q = to.query || {};
   const tokenQ = typeof q.token === 'string' ? q.token : '';
   if (tokenQ) {
     setTokenAndNotify(tokenQ);
-
     const rParam = typeof q.r === 'string' && q.r ? q.r : '';
     const ownerLike = to.path.startsWith('/owner') || q.owner === '1';
     const nextPath =
       rParam ||
       (ownerLike ? '/owner'
                  : (to.params?.slug ? `/${String(to.params.slug)}` : '/'));
-
-    const nextQuery = { ...q };
-    delete nextQuery.token;
-    delete nextQuery.r;
-    delete nextQuery.owner;
-
+    const nextQuery = { ...q }; delete nextQuery.token; delete nextQuery.r; delete nextQuery.owner;
     return { path: nextPath, query: nextQuery, replace: true };
   }
 
@@ -335,13 +358,8 @@ router.beforeEach(async (to) => {
   const isOwnerRoute = to.meta?.ownerArea || to.path.startsWith('/owner');
   if (isOwnerRoute) {
     enterOwnerMode(router, to.fullPath);
-
-    if (to.meta?.guestOnlyOwner && isAuthed()) {
-      return { name: 'owner-home', replace: true };
-    }
-    if (to.meta?.requiresAuth && !isAuthed()) {
-      return { name: 'owner-login', query: { r: to.fullPath }, replace: true };
-    }
+    if (to.meta?.guestOnlyOwner && isAuthed()) return { name: 'owner-home', replace: true };
+    if (to.meta?.requiresAuth && !isAuthed()) return { name: 'owner-login', query: { r: to.fullPath }, replace: true };
     return true;
   }
 
@@ -352,39 +370,59 @@ router.beforeEach(async (to) => {
   const slug = String(to.params.slug);
   enterTenantMode(router, slug, to.fullPath);
 
-  // ensure pid + user hydrated before checks
-  let prodId = localStorage.getItem('currentProductionId') || '';
-  if (!prodId) {
-    try { prodId = await ensurePidAndUserForSlug(slug); }
+  // Resolve pid (and hydrate access cache once)
+  let pid = localStorage.getItem('currentProductionId') || '';
+  if (!pid) {
+    try { pid = await ensurePidAndAccessForSlug(slug); }
     catch { return { path: '/', replace: true }; }
   }
 
+  // guest page
   if (to.meta?.guestOnlyTenant) {
-    if (isAuthed() && userHasProduction(prodId)) {
+    if (isAuthed() && hasTenantAccess(pid)) {
       return { name: 'tenant-home', params: { slug }, replace: true };
     }
     return true;
   }
 
+  // auth gate
   if (to.meta?.requiresAuth && !isAuthed()) {
     return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath }, replace: true };
   }
 
-  if (to.meta?.requiresMembership && !userHasProduction(prodId)) {
-    // try one hydration (in case user cache is stale)
+  // membership/authorization/admin gates (client-side UX; server still enforces)
+  if (to.meta?.requiresMembership && !hasTenantAccess(pid)) {
+    // try hydrate once
     try {
-      const me = await apiGet('/tenant/tenantauth/me');
-      try { localStorage.setItem('user', JSON.stringify(me)); } catch {}
+      const me = await apiGet('/tenant/tenantauth/me', undefined, { headers: { 'X-Production-Id': pid } });
+      const access = {
+        isMember: true,
+        owner: !!me?.owner,
+        role: me?.role || (me?.member?.role) || 'user',
+        siteAuthorized: !!(me?.member?.siteAuthorized) || !!me?.owner,
+        authorized: !!(me?.owner || me?.member?.siteAuthorized),
+      };
+      setAccessForPid(pid, access);
     } catch {}
-    if (!userHasProduction(prodId)) {
+    if (!hasTenantAccess(pid)) {
       return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath, err: 'not-authorized' }, replace: true };
     }
+  }
+
+  if (to.meta?.requiresAuthorized && !hasTenantAccess(pid, { requireAuthorized: true })) {
+    return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath, err: 'not-authorized' }, replace: true };
+  }
+
+  if (to.meta?.requiresAdmin && !hasTenantAccess(pid, { requireAuthorized: true, requireAdmin: true })) {
+    // send them home with a soft error
+    return { name: 'tenant-home', params: { slug }, query: { err: 'admin-only' }, replace: true };
   }
 
   return true;
 });
 
 export default router;
+
 
 
 

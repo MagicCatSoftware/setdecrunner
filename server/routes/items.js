@@ -18,8 +18,6 @@ const toObjectId = (v) =>
  * ---------------------------------------------------------------------------- */
 router.post(
   '/',
-  authRequired,
-  requireMembership,
   upload.fields([
     { name: 'image',  maxCount: 1 },  // single image
     { name: 'photos', maxCount: 10 }, // multiple photos
@@ -62,7 +60,7 @@ router.post(
 /* ----------------------------------------------------------------------------
  * LIST  (?q=&placeId=)
  * ---------------------------------------------------------------------------- */
-router.get('/', authRequired, requireMembership, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { q = '', placeId } = req.query;
 
@@ -97,7 +95,7 @@ router.get('/', authRequired, requireMembership, async (req, res) => {
 /* ----------------------------------------------------------------------------
  * READ
  * ---------------------------------------------------------------------------- */
-router.get('/:id', authRequired, requireMembership, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const item = await Item.findOne({
       _id: req.params.id,
@@ -114,7 +112,7 @@ router.get('/:id', authRequired, requireMembership, async (req, res) => {
 /* ----------------------------------------------------------------------------
  * UPDATE (JSON body)
  * ---------------------------------------------------------------------------- */
-router.patch('/:id', authRequired, requireMembership, async (req, res) => {
+router.patch('/:id', async (req, res) => {
   try {
     const upd = {};
     if (req.body.name !== undefined) {
@@ -152,7 +150,7 @@ router.patch('/:id', authRequired, requireMembership, async (req, res) => {
 /* ----------------------------------------------------------------------------
  * DELETE
  * ---------------------------------------------------------------------------- */
-router.delete('/:id', authRequired, requireMembership, async (req, res) => {
+router.delete('/:id',  async (req, res) => {
   try {
     const deleted = await Item.findOneAndDelete({
       _id: req.params.id,
@@ -170,8 +168,6 @@ router.delete('/:id', authRequired, requireMembership, async (req, res) => {
  * ---------------------------------------------------------------------------- */
 router.post(
   '/:id/photos',
-  authRequired,
-  requireMembership,
   upload.array('photos', 6),
   async (req, res) => {
     try {
@@ -200,7 +196,7 @@ router.post(
 /* ----------------------------------------------------------------------------
  * REMOVE PHOTO
  * ---------------------------------------------------------------------------- */
-router.delete('/:id/photos', authRequired, requireMembership, async (req, res) => {
+router.delete('/:id/photos', async (req, res) => {
   try {
     const { url } = req.body || {};
     const item = await Item.findOne({
