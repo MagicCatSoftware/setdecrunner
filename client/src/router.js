@@ -32,10 +32,6 @@ const Items                  = () => import('./views/Items.vue');
 const Places                 = () => import('./views/Places.vue');
 const AdminUsers             = () => import('./views/AdminUsers.vue');
 
-// Productions
-const Productions            = () => import('./views/Productions.vue');
-const ProductionEditor       = () => import('./views/ProductionEditor.vue');
-
 // Public
 const Public                 = () => import('./views/Public.vue');
 const Pricing                = () => import('./views/Pricing.vue');
@@ -270,11 +266,6 @@ const router = createRouter({
           hardLogout();
           return { name: 'tenant-login', params: { slug }, replace: true };
         } },
-
-        // Productions
-        { path: 'productions', name: 'productions', component: Productions, meta: { requiresAuth: true } },
-        { path: 'productions/new', name: 'production-new', component: ProductionEditor, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
-        { path: 'productions/:id', name: 'production-edit', component: ProductionEditor, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
         // Runsheets
         { path: 'runsheets',            name: 'runsheets',        component: RunSheets,      meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },

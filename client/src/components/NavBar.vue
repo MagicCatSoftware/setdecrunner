@@ -5,7 +5,7 @@
     <div class="nav__logo">
       <img src="/logo.png" alt="Set Dec Runner Logo" />
       <div class="nav__logo-texts">
-        <span class="nav__logo-text">Set Dec Runner</span>
+        
         <div class="nav__production" :title="productionTooltip">
           {{ productionLabel }}
         </div>
@@ -21,28 +21,6 @@
       <RouterLink class="nav__link" :to="{ name: 'items', params: { slug } }" draggable="false">Items</RouterLink>
       <RouterLink class="nav__link" :to="{ name: 'places', params: { slug } }" draggable="false">Places</RouterLink>
       <RouterLink class="nav__link" :to="{ name: 'suppliers', params: { slug } }" draggable="false">Suppliers</RouterLink>
-
-      <RouterLink class="nav__link" :to="{ name: 'productions', params: { slug } }" draggable="false">
-        Productions
-      </RouterLink>
-
-      <RouterLink
-        v-if="canEditCurrent"
-        class="nav__link"
-        :to="{ name: 'production-edit', params: { slug, id: currentProdId } }"
-        draggable="false"
-      >
-        Production Settings
-      </RouterLink>
-
-      <RouterLink
-        v-if="canCreateProduction"
-        class="nav__link"
-        :to="{ name: 'production-new', params: { slug } }"
-        draggable="false"
-      >
-        New Production
-      </RouterLink>
 
       <RouterLink
         v-if="showMembersLink"
@@ -280,7 +258,7 @@ onMounted(fetchProduction);
 <style scoped>
 .nav { display:flex; align-items:center; gap:16px; padding:10px 14px; border-bottom:1px solid #eee; background:#fff; }
 .nav__logo { display:flex; align-items:center; gap:10px; }
-.nav__logo img { height:32px; width:auto; }
+.nav__logo img { height:120px; width:auto; }
 .nav__logo-texts { display:flex; flex-direction:column; line-height:1.1; }
 .nav__logo-text { font-weight:700; }
 .nav__production { font-size:.9rem; color:#666; }
