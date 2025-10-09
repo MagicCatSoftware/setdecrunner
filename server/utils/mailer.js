@@ -21,8 +21,35 @@ export async function sendMail({ to, subject, html, text, from = process.env.MAI
   return mailer.sendMail(msg);
 }
 
-// Optional alias if you were calling sendMailer() elsewhere
-export const sendMailer = sendMail;
+export async function sendMemberSetPasswordEmail({
+  to,
+  name = '',
+  productionTitle = 'your production',
+  token,                       // signed token created by signMemberPasswordToken
+  // choose your front-end path. Router already has /set-password
+  path = '/set-password',      // or `/:slug/set-password` if you prefer slugged route
+}) {
+  if (!to) throw new Error('sendMemberSetPasswordEmail: "to" is required');
+  if (!token) throw new Error('sendMemberSetPasswordEmail: "token" is required');
+
+  const base = APP_BASE_URL || process.env.APP_BASE_URL || 'https://set-dec.com';
+  const url  = `${base}${path}?token=${encodeURIComponent(token)}`;
+
+  const subject = `Finish setting up access to ${productionTitle}`;
+  const html = `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5;">
+      <h2 style="margin:0 0 12px;">Welcome${name ? `, ${name}` : ''}!</h2>
+      <p>Click the button below to set your password for <strong>${productionTitle}</strong>.</p>
+      <p><a href="${url}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#111;color:#fff;text-decoration:none;">Set your password</a></p>
+      <p style="color:#666;font-size:13px;margin-top:18px;">This link expires shortly for security.</p>
+    </div>
+  `;
+  const text = `Welcome${name ? `, ${name}` : ''}!
+Set your password: ${url}
+(This link expires soon.)`;
+
+  return sendMail({ to, subject, html, text });
+}
 
 /**
  * Sends a temporary password email.

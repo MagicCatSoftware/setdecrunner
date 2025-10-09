@@ -1,17 +1,43 @@
 <template>
-<PublicNav/>
+  <PublicNav />
+
   <div class="login">
     <div class="login__card">
-      <h2 class="login__title">Set your password</h2>
+      <h2 class="login__title">
+        Set your password
+        <span v-if="title" class="small muted">for {{ title }}</span>
+      </h2>
 
       <form class="flex col gap-2" @submit.prevent="submit">
-        <input class="input" v-model.trim="password" type="password" placeholder="New password (min 8 chars)" required />
-        <input class="input" v-model.trim="confirm"  type="password" placeholder="Confirm password" required />
-        <button class="btn btn--primary" :disabled="loading || resolving">
-          {{ (loading || resolving) ? 'Working…' : 'Set password' }}
-        </button>
+        <div v-if="resolving" class="text-muted">Validating your link…</div>
 
-        <p v-if="resolving" class="text-muted">Resolving production…</p>
+        <div v-else>
+          <div v-if="email" class="small muted">Account: {{ email }}</div>
+
+          <input
+            class="input"
+            v-model.trim="password"
+            type="password"
+            placeholder="New password (min 8 chars)"
+            minlength="8"
+            required
+            autocomplete="new-password"
+          />
+          <input
+            class="input"
+            v-model.trim="confirm"
+            type="password"
+            placeholder="Confirm password"
+            minlength="8"
+            required
+            autocomplete="new-password"
+          />
+
+          <button class="btn btn--primary" :disabled="loading || resolving || !token">
+            {{ (loading || resolving) ? 'Working…' : 'Set password' }}
+          </button>
+        </div>
+
         <p v-if="msg" class="text-muted">{{ msg }}</p>
         <p v-if="err" class="login__error">{{ err }}</p>
       </form>
@@ -20,8 +46,7 @@
 </template>
 
 <script setup>
-
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import api from '../api.js';
 import PublicNav from '../components/PublicNav.vue';
@@ -29,95 +54,81 @@ import PublicNav from '../components/PublicNav.vue';
 const router = useRouter();
 const route  = useRoute();
 
-const token = ref('');
-const email = ref('');
+const token    = ref('');
+const email    = ref('');
+const title    = ref('');
+const slug     = ref('');        // returned by verify endpoint
+const memberId = ref('');
+const prodId   = ref('');
+
 const password = ref('');
 const confirm  = ref('');
 
-const loading = ref(false);
+const loading   = ref(false);
 const resolving = ref(false);
-const msg = ref('');
-const err = ref('');
+const msg       = ref('');
+const err       = ref('');
 
-// Support either /:slug/set-password or /set-password?slug=...
-const slug = computed(() => route.params.slug || route.query.slug || '');
-const productionId = ref('');
+/** Validate the token and fetch display info (email, production title, slug) */
+async function verifyToken() {
+  if (!token.value) { err.value = 'Missing reset token in URL.'; return; }
+  resolving.value = true; err.value = ''; msg.value = '';
 
-// Try several common endpoints to resolve slug -> productionId.
-// If none succeed, we'll still send the slug so the backend can resolve.
-async function resolveProductionIdBySlug(slugVal) {
-  if (!slugVal) return '';
-  resolving.value = true;
   try {
-    // 1) /productions/slug/:slug -> { _id,... }
-    try {
-      const p1 = await api.get(`/productions/slug/${encodeURIComponent(slugVal)}`);
-      if (p1 && (p1._id || p1.id)) return p1._id || p1.id;
-    } catch (_) {}
+    // Explicitly drop Authorization on public endpoint (defensive; ok if your api ignores).
+    const info = await api.get(
+      `/tenant/tenantauth/set-password/verify`,
+      { params: { token: token.value }, headers: { Authorization: '' } }
+    );
 
-    // 2) /productions/by-slug/:slug -> { _id,... }
-    try {
-      const p2 = await api.get(`/productions/by-slug/${encodeURIComponent(slugVal)}`);
-      if (p2 && (p2._id || p2.id)) return p2._id || p2.id;
-    } catch (_) {}
+    // Expected shape:
+    // { ok, productionId, slug, email, memberId, title }
+    prodId.value   = String(info.productionId || '');
+    slug.value     = String(info.slug || '');
+    email.value    = String(info.email || '');
+    memberId.value = String(info.memberId || '');
+    title.value    = String(info.title || '');
 
-    // 3) /productions?slug=foo -> [ ... ]
-    try {
-      const list = await api.get('/productions', { params: { slug: slugVal } });
-      if (Array.isArray(list) && list.length) {
-        const first = list[0];
-        if (first && (first._id || first.id)) return first._id || first.id;
-      }
-    } catch (_) {}
-
-    return '';
+  } catch (e) {
+    err.value = e?.response?.data?.error || 'Invalid or expired link.';
   } finally {
     resolving.value = false;
   }
 }
 
 onMounted(async () => {
-  token.value = route.query.token || '';
-  email.value = route.query.email || '';
-  if (!token.value) err.value = 'Missing reset token in URL.';
-  if (slug.value) {
-    productionId.value = await resolveProductionIdBySlug(slug.value);
-  }
+  token.value = String(route.query.token || '');
+  await verifyToken();
 });
 
 async function submit() {
-  if (password.value.length < 8) { err.value = 'Password must be at least 8 characters'; return; }
-  if (password.value !== confirm.value) { err.value = 'Passwords do not match'; return; }
   if (!token.value) { err.value = 'Missing reset token.'; return; }
+  if (password.value.length < 8) { err.value = 'Password must be at least 8 characters.'; return; }
+  if (password.value !== confirm.value) { err.value = 'Passwords do not match.'; return; }
 
+  loading.value = true; err.value = ''; msg.value = '';
   try {
-    loading.value = true; err.value = ''; msg.value = '';
-
-    const body = {
-      token: token.value,
-      password: password.value,
-      // include these if available; backend can use either
-      ...(email.value ? { email: email.value } : {}),
-      ...(slug.value ? { slug: slug.value } : {}),
-      ...(productionId.value ? { productionId: productionId.value } : {}),
-    };
-
-    await api.post('/auth/complete-reset', body);
+    await api.post(
+      '/tenant/tenantauth/set-password',
+      { token: token.value, password: password.value },
+      { headers: { Authorization: '' } }
+    );
 
     msg.value = 'Password set! You can now sign in.';
-    // Prefer tenant login if slug exists
-    if (slug.value) {
-      router.replace({ name: 'tenant-login', params: { slug: slug.value } });
-    } else {
-      router.replace('/login');
-    }
+    // Prefer redirect to the tenant login for this production
+    const s = slug.value || route.params.slug || route.query.slug || '';
+    setTimeout(() => {
+      if (s) router.replace({ name: 'tenant-login', params: { slug: s } });
+      else router.replace({ name: 'marketing' });
+    }, 800);
   } catch (e) {
-    err.value = e?.response?.data?.error || e.message || 'Failed to set password';
+    err.value = e?.response?.data?.error || 'Failed to set password.';
   } finally {
     loading.value = false;
   }
 }
 </script>
+
 
 <style scoped>
 .login {

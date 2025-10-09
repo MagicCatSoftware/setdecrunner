@@ -5,6 +5,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Production, { normalizeSlug } from '../models/Production.js';
 import User from '../models/User.js';
+import { verifyMemberPasswordToken } from '../utils/tokens.js';
+
 
 const router = Router();
 
@@ -306,6 +308,52 @@ router.get('/me', tenantAuthRequired, async (req, res) => {
     });
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Failed to load tenant session' });
+  }
+});
+
+router.get('/set-password/verify', async (req, res) => {
+  try {
+    const token = String(req.query.token || '');
+    if (!token) return res.status(400).json({ error: 'Missing token' });
+    const dec = verifyMemberPasswordToken(token); // { pid, mid, email, ... }
+    const prod = await Production.findById(dec.pid).select('_id slug title members._id members.email').lean();
+    if (!prod) return res.status(404).json({ error: 'Production not found' });
+
+    const m = (prod.members || []).find(x => String(x._id) === String(dec.mid) && String(x.email).toLowerCase() === String(dec.email).toLowerCase());
+    if (!m) return res.status(404).json({ error: 'Member not found' });
+
+    return res.json({
+      ok: true,
+      productionId: String(prod._id),
+      slug: prod.slug,
+      email: dec.email,
+      memberId: String(m._id),
+      title: prod.title || prod.slug,
+    });
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid or expired token' });
+  }
+});
+
+// Consume token and set password
+router.post('/set-password', async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    if (!token || !password) return res.status(400).json({ error: 'token and password required' });
+    if (String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const dec = verifyMemberPasswordToken(token); // { pid, mid, email }
+    const hash = await bcrypt.hash(String(password), 12);
+
+    const q = { _id: dec.pid, 'members._id': dec.mid, 'members.email': dec.email.toLowerCase() };
+    const upd = { $set: { 'members.$.passwordHash': hash } };
+    const r = await Production.updateOne(q, upd, { strict: false });
+
+    if (!r?.modifiedCount) return res.status(400).json({ error: 'Unable to update password (invalid token/member)' });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid or expired token' });
   }
 });
 

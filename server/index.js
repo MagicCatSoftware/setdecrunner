@@ -40,6 +40,7 @@ import ocrRouter from './routes/ocr.js';
 import ownerRoutes from './routes/owner.js';
 import tenantAuthRouter from './routes/tenantAuth.js';
 import {tenantGate} from './middleware/tenantAuth.js';
+import passwordResetRoutes from './routes/passwordReset.js';
 
 const app = express();
 
@@ -395,6 +396,7 @@ app.use('/tenant/ocr', ocrRouter);
 app.use('/tenant/runsheetsbyhand', runsheetHandRouter);
 app.use('/owner/productions', ownerRoutes);
 app.use('/tenant/tenantauth', tenantAuthRouter);
+app.use('/pwr', passwordResetRoutes); 
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

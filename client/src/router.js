@@ -62,7 +62,6 @@ function decodeJwtPayload(t) {
     return JSON.parse(atob(b64 + pad));
   } catch { return null; }
 }
-/** token missing => false; expired JWT => false (and clear); opaque/non-expiring => true */
 function isAuthed() {
   const t = getToken();
   if (!t) return false;
@@ -118,12 +117,6 @@ function setTokenAndNotify(token) {
 }
 
 /* -------------- tenant access cache (by production) -------------- */
-/**
- * Structure:
- * tenantAccessCache = {
- *   "<pid>": { isMember: true, owner: boolean, role: string|null, siteAuthorized: boolean, authorized: boolean }
- * }
- */
 function readAccessCache() {
   try { return JSON.parse(localStorage.getItem('tenantAccessCache') || '{}'); }
   catch { return {}; }
@@ -174,7 +167,6 @@ async function ensurePidAndAccessForSlug(slug) {
     if (isAuthed()) {
       try {
         const me = await apiGet('/tenant/tenantauth/me', undefined, { headers: { 'X-Production-Id': pid } });
-        // me: { ok, productionId, owner, role, member:{siteAuthorized,...}, email, ... }
         const access = {
           isMember: true,
           owner: !!me?.owner,
@@ -184,14 +176,14 @@ async function ensurePidAndAccessForSlug(slug) {
         };
         setAccessForPid(pid, access);
 
-        // Keep legacy 'user' in localStorage broadly compatible (optional)
+        // Optional legacy user cache update
         try {
           const legacy = JSON.parse(localStorage.getItem('user') || 'null') || {};
           const productionIds = Array.from(new Set([...(legacy.productionIds || []), pid]));
           localStorage.setItem('user', JSON.stringify({ ...legacy, productionIds }));
         } catch {}
       } catch {
-        // Leave cache empty; server will 401/403 as needed later
+        // leave cache empty; server enforces later
       }
     }
     return pid;
@@ -213,6 +205,9 @@ const router = createRouter({
     { path: '/features', name: 'features', component: Features },
     { path: '/FAQ', name: 'FAQ', component: FAQ },
 
+    // Global set-password (no slug) — works for emails that don't include slug in path
+    { path: '/set-password', name: 'set-password', component: SetPassword },
+
     // Owner area
     { path: '/owner/login', name: 'owner-login', component: OwnerLogin, meta: { guestOnlyOwner: true, ownerArea: true } },
     { path: '/owner/logout', name: 'owner-logout', beforeEnter: () => { hardLogout(); return { name: 'owner-login', replace: true }; } },
@@ -231,8 +226,6 @@ const router = createRouter({
       },
     },
 
-    { path: '/set-password', name: 'set-password', component: SetPassword },
-
     // Tenant area
     {
       path: '/:slug',
@@ -249,6 +242,14 @@ const router = createRouter({
       },
       children: [
         { path: 'login', name: 'tenant-login', component: TenantLogin, meta: { guestOnlyTenant: true } },
+
+        // Tenant-scoped set password page — allow guests and signed-in users
+        {
+          path: 'set-password',
+          name: 'tenant-set-password',
+          component: SetPassword,
+          meta: { guestOnlyTenant: true, allowAuthed: true },
+        },
 
         {
           path: '',
@@ -270,7 +271,7 @@ const router = createRouter({
           return { name: 'tenant-login', params: { slug }, replace: true };
         } },
 
-        // Productions (keep accessible but still require membership/authorization if they call tenant APIs)
+        // Productions
         { path: 'productions', name: 'productions', component: Productions, meta: { requiresAuth: true } },
         { path: 'productions/new', name: 'production-new', component: ProductionEditor, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
         { path: 'productions/:id', name: 'production-edit', component: ProductionEditor, props: true, meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
@@ -339,10 +340,14 @@ const router = createRouter({
 
 /* ---------------- global guard ---------------- */
 router.beforeEach(async (to) => {
-  // 0) OAuth handoff catcher (?token=…)
   const q = to.query || {};
   const tokenQ = typeof q.token === 'string' ? q.token : '';
-  if (tokenQ) {
+
+  // ⛔ Only treat ?token= as an OAuth handoff IF we are NOT on set-password routes.
+  const isSetPasswordRoute =
+    to.name === 'set-password' || to.name === 'tenant-set-password';
+
+  if (tokenQ && !isSetPasswordRoute) {
     setTokenAndNotify(tokenQ);
     const rParam = typeof q.r === 'string' && q.r ? q.r : '';
     const ownerLike = to.path.startsWith('/owner') || q.owner === '1';
@@ -377,8 +382,9 @@ router.beforeEach(async (to) => {
     catch { return { path: '/', replace: true }; }
   }
 
-  // guest page
+  // guest pages
   if (to.meta?.guestOnlyTenant) {
+    if (to.meta?.allowAuthed) return true; // let authed users view (e.g., set-password)
     if (isAuthed() && hasTenantAccess(pid)) {
       return { name: 'tenant-home', params: { slug }, replace: true };
     }
@@ -390,9 +396,8 @@ router.beforeEach(async (to) => {
     return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath }, replace: true };
   }
 
-  // membership/authorization/admin gates (client-side UX; server still enforces)
+  // membership/authorization/admin gates
   if (to.meta?.requiresMembership && !hasTenantAccess(pid)) {
-    // try hydrate once
     try {
       const me = await apiGet('/tenant/tenantauth/me', undefined, { headers: { 'X-Production-Id': pid } });
       const access = {
@@ -414,7 +419,6 @@ router.beforeEach(async (to) => {
   }
 
   if (to.meta?.requiresAdmin && !hasTenantAccess(pid, { requireAuthorized: true, requireAdmin: true })) {
-    // send them home with a soft error
     return { name: 'tenant-home', params: { slug }, query: { err: 'admin-only' }, replace: true };
   }
 
@@ -422,6 +426,7 @@ router.beforeEach(async (to) => {
 });
 
 export default router;
+
 
 
 

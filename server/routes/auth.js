@@ -71,50 +71,11 @@ router.post('/local/register', async (req, res) => {
   }
 });
 
-router.post('/complete-reset', async (req, res) => {
-  try {
-    const { token, password } = req.body || {};
-    if (!token || !password) {
-      return res.status(400).json({ error: 'token and password required' });
-    }
-    if (String(password).length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
-    }
-
-    const hash = crypto.createHash('sha256').update(token).digest('hex');
-
-    const user = await User.findOne({
-      resetTokenHash: hash,
-      resetExpiresAt: { $gt: new Date() },
-    });
-
-    if (!user) {
-      return res.status(400).json({ error: 'Invalid or expired reset token.' });
-    }
-
-    await user.setPassword(password);
-    user.resetTokenHash = undefined;
-    user.resetExpiresAt = undefined;
-    user.verified = true; // optional: mark verified after a reset
-    await user.save();
-
-    const jwt = signToken(user);
-    return res.json({
-      ok: true,
-      token: jwt,
-      user: { _id: user._id, email: user.email, name: user.name, role: user.role },
-    });
-  } catch (e) {
-    console.error('[complete-reset] error', e);
-    return res.status(500).json({ error: 'Failed to complete password reset.' });
-  }
-});
-
 // Login (local) — user must already be a member of the slug’s production
 router.post('/local/login', async (req, res) => {
   try {
-    const { email, password, slug } = req.body || {};
-    if (!email || !password || !slug) {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
       return sendError(res, 400, 'Email, password, and slug required');
     }
 
@@ -125,14 +86,6 @@ router.post('/local/login', async (req, res) => {
     const ok = await bcrypt.compare(String(password), user.passwordHash);
     if (!ok) return sendError(res, 401, 'Invalid credentials');
 
-    const prod = await Production.findOne({ slug: normalizeSlug(slug), isActive: true })
-      .select('_id slug')
-      .lean();
-    if (!prod) return sendError(res, 404, 'Production not found');
-
-    const isMember = (user.productionIds || []).map(String).includes(String(prod._id));
-    if (!isMember) return sendError(res, 403, 'Not authorized for this production');
-
     const token = issueJwt(user);
     return res.json({
       token,
@@ -141,7 +94,6 @@ router.post('/local/login', async (req, res) => {
         email: user.email,
         productionIds: user.productionIds,
         role: user.role,
-        homeSlug: slug,
       },
     });
   } catch (e) {
