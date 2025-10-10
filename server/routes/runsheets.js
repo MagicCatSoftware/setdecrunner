@@ -261,6 +261,7 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
+  
   try {
     const b = req.body || {};
 
@@ -303,7 +304,7 @@ router.post('/', async (req, res, next) => {
     // QC
     const qcItemsGood = boolish(b.qcItemsGood) ?? null;
 
-    console.log(req.headers);
+    console.log(req.user);
 
     const rs = await Runsheet.create({
       productionId: req.headers['x-production-id'],

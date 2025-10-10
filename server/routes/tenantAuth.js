@@ -293,6 +293,8 @@ router.get('/me', tenantAuthRequired, async (req, res) => {
     const isOwner = idsEqual(me.user, (prod.ownerUserId ?? prod.owner));
     const role = me.role || (isOwner ? 'admin' : 'user');
 
+    req.user = me.user;
+
     return res.json({
       ok: true,
       productionId: String(prod._id),

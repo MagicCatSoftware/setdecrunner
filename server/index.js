@@ -37,7 +37,7 @@ import ocrRouter from './routes/ocr.js';
 import ownerRoutes from './routes/owner.js';
 import tenantAuthRouter from './routes/tenantAuth.js';
 import passwordResetRoutes from './routes/passwordReset.js';
-
+import {bearerAuth} from './middleware/bearerAuth.js';
 const app = express();
 
 /* ------------------------------ Stripe ------------------------------ */
@@ -740,15 +740,15 @@ app.get('/tenant/productions/by_slug/:slug', async (req, res) => {
 });
 
 /* ----------------------------- Tenant routes ------------------------------ */
-app.use('/tenant/productions', tenantGate({ authorized: true, admin: false }), productionRoutes);
-app.use('/tenant/users', tenantGate({ authorized: true, admin: true }), userRoutes);
-app.use('/tenant/runsheets', tenantGate({ authorized: true, admin: false }), runsheetRoutes);
-app.use('/tenant/items', tenantGate({ authorized: true, admin: false }), itemRoutes);
-app.use('/tenant/places', tenantGate({ authorized: true, admin: false }), placeRoutes);
-app.use('/tenant/suppliers', tenantGate({ authorized: true, admin: false }), supplierRoutes);
-app.use('/tenant/people', tenantGate({ authorized: true, admin: false }), peopleRoutes);
-app.use('/tenant/admin', tenantGate({ authorized: true, admin: true }), adminUsersRouter);
-app.use('/tenant/sets', tenantGate({ authorized: true, admin: false }), setRoutes);
+app.use('/tenant/productions',bearerAuth, tenantGate({ authorized: true, admin: false }), productionRoutes);
+app.use('/tenant/users',bearerAuth, tenantGate({ authorized: true, admin: true }), userRoutes);
+app.use('/tenant/runsheets',bearerAuth, tenantGate({ authorized: true, admin: false }), runsheetRoutes);
+app.use('/tenant/items',bearerAuth, tenantGate({ authorized: true, admin: false }), itemRoutes);
+app.use('/tenant/places',bearerAuth, tenantGate({ authorized: true, admin: false }), placeRoutes);
+app.use('/tenant/suppliers',bearerAuth, tenantGate({ authorized: true, admin: false }), supplierRoutes);
+app.use('/tenant/people',bearerAuth, tenantGate({ authorized: true, admin: false }), peopleRoutes);
+app.use('/tenant/admin',bearerAuth, tenantGate({ authorized: true, admin: true }), adminUsersRouter);
+app.use('/tenant/sets',bearerAuth, tenantGate({ authorized: true, admin: false }), setRoutes);
 
 // Misc tenant endpoints
 app.use('/tenant', tenantGate({ authorized: true, admin: true }), tenantRouter);
