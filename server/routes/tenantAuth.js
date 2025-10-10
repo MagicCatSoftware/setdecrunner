@@ -216,8 +216,9 @@ router.post('/login', async (req, res) => {
     if (!prod) return res.status(404).json({ error: 'Production not found' });
 
     const m = (prod.members || []).find(x => lc(x?.email) === lc(email));
+    
     if (!m || !m.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
-
+    
     const passOK = await bcrypt.compare(String(password), m.passwordHash);
     if (!passOK) return res.status(401).json({ error: 'Invalid credentials' });
 

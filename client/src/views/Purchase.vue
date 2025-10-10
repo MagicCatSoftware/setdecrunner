@@ -203,19 +203,19 @@ async function submit() {
 
     // Prepare payload for server-side checkout session (Stripe)
     const payload = {
-      title:form.productionName,
-      production:form.productionSlug,
-      plan: form.plan,
-      price: Number(form.price),
-      contact: { name: form.name, email: form.email, address: form.address },
-      production: {
-        name: form.productionName,
-        slug: form.productionSlug,
-        address: form.productionAddress,
-        phone: form.productionPhone,
-        company: form.productionCompany,
-      },
-    };
+  plan: form.plan,
+  price: Number(form.price),
+  contact: { name: form.name, email: form.email, address: form.address },
+  production: {
+    title:   form.productionName,
+    slug:    form.productionSlug,
+    address: form.productionAddress,
+    phone:   form.productionPhone,
+    company: form.productionCompany,
+  },
+  // keep slug also top-level for convenience if you like
+  productionSlug: form.productionSlug
+};
 
     // Call your backend to create a checkout session
     // Adjust endpoint if your server uses a different path.

@@ -9,7 +9,8 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import nodemailer from 'nodemailer';
+
+import { sendMail, sendTempPasswordEmail } from './utils/mailer.js';
 
 import Production, { normalizeSlug } from './models/Production.js';
 import User from './models/User.js';
@@ -30,16 +31,11 @@ import setRoutes from './routes/sets.js';
 import productionRoutes from './routes/productions.js';
 import runsheetHandRouter from './routes/runsheetHand.js';
 
-import { authRequired, issueJwt } from './middleware/auth.js';
-import { requireMembership } from './middleware/requireMembership.js';
-
-
-// Optional services and extra routes
-import { ensureTempAccountAndInvite } from './services/users.js'; // OK if unused
+import { issueJwt } from './middleware/auth.js';
+import { tenantGate } from './middleware/tenantAuth.js';
 import ocrRouter from './routes/ocr.js';
 import ownerRoutes from './routes/owner.js';
 import tenantAuthRouter from './routes/tenantAuth.js';
-import {tenantGate} from './middleware/tenantAuth.js';
 import passwordResetRoutes from './routes/passwordReset.js';
 
 const app = express();
@@ -57,11 +53,10 @@ app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin || allowlist.has(origin)) return cb(null, true);
-      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return cb(null, true); // dev convenience
+      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return cb(null, true);
       return cb(new Error(`CORS: origin not allowed: ${origin}`));
     },
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    // 🔑 allow ALL custom headers your frontend sends
     allowedHeaders: [
       'Content-Type',
       'Authorization',
@@ -71,7 +66,6 @@ app.use(
       'X-API-Retried',
       'X-Skip-Pid',
     ],
-    // (optional) expose anything you want the browser to read from responses
     exposedHeaders: ['Content-Type'],
     credentials: false,
     optionsSuccessStatus: 204,
@@ -97,87 +91,162 @@ app.use(
 
 const FRONTEND_URL = process.env.FRONTEND_URL || ORIGIN;
 
-/* --------------------------- Mailer (inline) --------------------------- */
-const MAIL_FROM = process.env.MAIL_FROM || 'no-reply@magiccatsoftware.ca';
+/* --------------------------- App constants --------------------------- */
+const MAIL_FROM = process.env.MAIL_FROM || 'setdecrunner@gmail.com';
 const APP_BASE_URL = process.env.APP_BASE_URL || FRONTEND_URL;
 const LOGIN_PATH = process.env.LOGIN_PATH || '/login';
 
-const mailer = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth:
-    process.env.SMTP_USER && process.env.SMTP_PASS
-      ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-      : undefined,
-  tls: { minVersion: 'TLSv1.2' },
-});
-
-if (process.env.VERIFY_SMTP === 'true') {
-  mailer
-    .verify()
-    .then(() => console.log('SMTP: ready'))
-    .catch((err) => console.error('SMTP verify failed:', err.message));
-}
-
-async function sendMail({ to, subject, html, text, from = MAIL_FROM, headers }) {
-  if (!to) throw new Error('sendMail: "to" is required');
-  if (!subject) throw new Error('sendMail: "subject" is required');
-  const info = await mailer.sendMail({ from, to, subject, html, text, headers });
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('Mail sent:', info.messageId);
-  }
-  return info;
-}
-
-async function sendTempPasswordEmail({
-  to,
-  name = '',
-  tempPassword,
-  productionTitle = 'your account',
-  loginPath = LOGIN_PATH,
-}) {
-  if (!to) throw new Error('sendTempPasswordEmail: "to" is required');
-  if (!tempPassword) throw new Error('sendTempPasswordEmail: "tempPassword" is required');
-
-  const loginUrl = `${APP_BASE_URL}${loginPath}`;
-  const subject = `Your ${productionTitle} is ready — temporary password inside`;
-  const html = `
-    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5;">
-      <h2 style="margin:0 0 12px;">Welcome${name ? `, ${name}` : ''}!</h2>
-      <p>We've set up your account${productionTitle ? ` for <strong>${productionTitle}</strong>` : ''}.</p>
-      <p><strong>Temporary password:</strong></p>
-      <pre style="background:#f5f5f7;padding:12px;border-radius:8px;display:inline-block;">${tempPassword}</pre>
-      <p>Please sign in and change it right away:</p>
-      <p><a href="${loginUrl}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#111;color:#fff;text-decoration:none;">Sign in</a></p>
-      <p style="color:#666;font-size:13px;margin-top:18px;">If you didn’t expect this email, you can ignore it.</p>
-    </div>
-  `;
-  const text = `Welcome${name ? `, ${name}` : ''}!
-Temporary password: ${tempPassword}
-Sign in: ${loginUrl}
-For security, please change it right away.`;
-
-  return sendMail({ to, subject, html, text });
-}
-
-/* ----------------- Helpers: membership + temp password ----------------- */
-async function attachMembership(prod, user) {
-  await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prod._id } });
-  const hasMembers = await Production.exists({ _id: prod._id, 'members.0': { $exists: true } });
-  const role = hasMembers ? 'editor' : 'admin';
-  await Production.updateOne(
-    { _id: prod._id, 'members.user': { $ne: user._id } },
-    {
-      $push: { members: { user: user._id, role, addedAt: new Date() } },
-      ...(hasMembers ? {} : { $set: { ownerUserId: user._id } }),
-    }
-  );
-  return role;
-}
-
+/* ------------------- Helpers for temp password email ------------------ */
 function genTempPassword(length = 12) {
   return crypto.randomBytes(Math.ceil((length * 3) / 4)).toString('base64url').slice(0, length);
+}
+
+/**
+ * ALWAYS issue a per-production temp password for the owner.
+ * - Generates a fresh temp password EVERY TIME (per production activation),
+ *   hashes it, and stores it on the production member's `passwordHash`.
+ * - Does NOT rotate the global User.passwordHash (unless the user has none).
+ * - Ensures owner/admin member exists and is wired to the user & email.
+ * Returns: { user, emailLC, tempPassword, ownerPasswordHash }
+ */
+async function ensureOwnerFromProduction(prod, fallbackEmailLC) {
+  if (!prod) throw new Error('ensureOwnerFromProduction: production doc required');
+
+  const toId = v => (v && typeof v === 'object' && v.toString) ? v.toString() : String(v || '');
+  const eqId = (a, b) => toId(a) === toId(b);
+  const norm = s => String(s || '').trim().toLowerCase();
+
+  const prodId = toId(prod._id);
+  const ownerId = toId(prod.ownerUserId || prod.owner || '');
+
+  // 1) Resolve target email we’ll use for the owner member.
+  // Prefer an existing owner/admin member email; else fallback.
+  let candidate =
+    (prod.members || []).find(m => ownerId && eqId(m?.user, ownerId)) ||
+    (prod.members || []).find(m => norm(m?.role) === 'admin') ||
+    null;
+
+  const emailLC = norm(candidate?.email) || norm(fallbackEmailLC);
+  if (!emailLC) {
+    return { user: null, emailLC: null, tempPassword: null, ownerPasswordHash: null };
+  }
+
+  // 2) Ensure backing User exists and is linked to the production
+  let user = await User.findOne({ email: emailLC });
+  if (!user) {
+    user = await User.create({
+      email: emailLC,
+      role: 'user',
+      isActive: true,
+      productionIds: [prodId],
+    });
+  } else {
+    await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prodId } });
+  }
+
+  // If the global user has NO password, set one so they can still use non-tenant routes.
+  let setGlobalNow = false;
+  if (!user.passwordHash) setGlobalNow = true;
+
+  // 3) Find the *exact* member we will update for this user:
+  //    priority: (user match) > (email match) > (existing candidate) > (create)
+  let member =
+    (prod.members || []).find(m => eqId(m?.user, user._id)) ||
+    (prod.members || []).find(m => norm(m?.email) === emailLC) ||
+    candidate ||
+    null;
+
+  // 4) Generate per-production temp password + hash
+  const tempPassword = genTempPassword(12);
+  const ownerPasswordHash = await bcrypt.hash(tempPassword, 12);
+
+  // Optionally stamp the global user hash if they had none
+  if (setGlobalNow) {
+    await User.updateOne(
+      { _id: user._id },
+      { passwordHash: ownerPasswordHash, mustChangePassword: true, isActive: true }
+    );
+  }
+
+  // 5) Create or update the *exact* member row so user + hash stay in sync
+  if (!member) {
+    // Insert a new admin member for this user/email
+    await Production.updateOne(
+      { _id: prodId, 'members.email': { $ne: emailLC } },
+      {
+        $push: {
+          members: {
+            user: user._id,
+            role: 'admin',
+            siteAuthorized: true,
+            email: emailLC,
+            passwordHash: ownerPasswordHash,
+            addedAt: new Date(),
+          },
+        },
+      }
+    );
+  } else if (member._id) {
+    // Update the existing member by its _id (most precise)
+    await Production.updateOne(
+      { _id: prodId, 'members._id': member._id },
+      {
+        $set: {
+          'members.$.user': user._id,
+          'members.$.email': emailLC,
+          'members.$.passwordHash': ownerPasswordHash,
+          'members.$.role': member.role || 'admin',
+          'members.$.siteAuthorized': member.siteAuthorized ?? true,
+        },
+      }
+    );
+  } else {
+    // Fallback: use arrayFilters to target by user or by email deterministically
+    const filters = [];
+    const setOps = { 'members.$[t].passwordHash': ownerPasswordHash, 'members.$[t].user': user._id, 'members.$[t].email': emailLC };
+    if (member.user) {
+      filters.push({ 't.user': user._id });
+    } else {
+      filters.push({ 't.email': emailLC });
+    }
+    await Production.updateOne(
+      { _id: prodId },
+      { $set: setOps },
+      { arrayFilters: filters }
+    );
+  }
+
+  // 6) Ensure top-level owner pointers match this user
+  if (!ownerId || !eqId(ownerId, user._id)) {
+    await Production.updateOne(
+      { _id: prodId },
+      { $set: { ownerUserId: user._id, owner: user._id } }
+    );
+  }
+
+  return { user, emailLC, tempPassword, ownerPasswordHash };
+}
+
+/**
+ * Fallback: ensure/prepare owner by email only (no production context).
+ * Used only when we create a production in the legacy path.
+ * Still issues a NEW per-production temp password after the production is created.
+ */
+async function ensureOwnerByEmail(emailLC) {
+  if (!emailLC) return { user: null, tempPassword: null, ownerPasswordHash: null };
+
+  let user = await User.findOne({ email: emailLC });
+  if (!user) {
+    user = await User.create({
+      email: emailLC,
+      role: 'user',
+      isActive: true,
+    });
+  }
+
+  // Note: per-production temp password will be generated AFTER the production is created,
+  // using ensureOwnerFromProduction for that new production.
+  return { user, tempPassword: null, ownerPasswordHash: user.passwordHash || null };
 }
 
 /* -------------------------------- Utils -------------------------------- */
@@ -217,11 +286,95 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
       }
 
       const meta = session.metadata || {};
-      const title = (meta.title || 'Production').trim();
-      const slug  = normalizeSlug(meta.desiredSlug || title);
       const currency = (session.currency ?? process.env.CURRENCY) || 'usd';
 
-      // Idempotency: do we already have this production/session?
+      const productionId = meta.productionId || session.client_reference_id || null;
+
+      // Purchaser email
+      let email =
+        session?.customer_details?.email ||
+        session?.customer_email ||
+        null;
+      if (!email && session.customer) {
+        try {
+          const cust = await stripe.customers.retrieve(session.customer);
+          email = cust?.email || null;
+        } catch { /* ignore */ }
+      }
+      const emailLC = email ? String(email).toLowerCase() : null;
+
+      if (productionId) {
+        const prod = await Production.findById(productionId).lean();
+        if (prod) {
+          // Derive owner + ALWAYS issue per-production temp password
+          const ensured = await ensureOwnerFromProduction(prod, emailLC);
+          const user = ensured.user;
+          const tempPassword = ensured.tempPassword;
+          const ownerPasswordHash = ensured.ownerPasswordHash;
+
+          // Activate & stamp stripe
+          await Production.updateOne(
+            { _id: prod._id },
+            {
+              $set: {
+                isActive: true,
+                'stripe.status': 'active',
+                'stripe.checkoutSessionId': session.id,
+                'stripe.paymentIntentId': session.payment_intent,
+                'stripe.amount': session.amount_total ?? prod?.stripe?.amount ?? null,
+                'stripe.currency': currency,
+              },
+            }
+          );
+
+          if (user) {
+            const emailLC2 = user.email.toLowerCase();
+            await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prod._id } });
+            await Production.updateOne(
+              { _id: prod._id, 'members.user': { $ne: user._id } },
+              {
+                $addToSet: {
+                  members: {
+                    user: user._id,
+                    role: 'admin',
+                    siteAuthorized: true,
+                    email: emailLC2,
+                    passwordHash: ownerPasswordHash,
+                    addedAt: new Date(),
+                  },
+                },
+              }
+            );
+          }
+
+          // Email the per-production temp password
+          if (user && tempPassword) {
+            try {
+              await sendTempPasswordEmail({
+                to: user.email,
+                name: user.name || '',
+                tempPassword,
+                productionTitle: prod.title,
+                loginPath: LOGIN_PATH,
+              });
+            } catch (mailErr) {
+              console.error('Temp password email failed:', mailErr.message);
+            }
+          }
+
+          return res.json({ received: true, activated: true, productionId: String(prod._id) });
+        }
+      }
+
+      // Legacy fallback: provision now (no temp prod found)
+      const title = (meta.title || 'Production').trim();
+      const slug = normalizeSlug(meta.desiredSlug || title) || normalizeSlug(title) || `prod-${Date.now()}`;
+
+      // Ensure owner user record exists (no temp here yet)
+      const ensuredUser = await ensureOwnerByEmail(emailLC);
+      const user = ensuredUser.user;
+
+      // Create or update production
       let prod = await Production.findOne({
         $or: [
           { 'stripe.checkoutSessionId': session.id },
@@ -230,91 +383,33 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
         ],
       }).lean();
 
-      // Purchaser email (owner)
-      let email =
-        session?.customer_details?.email ||
-        session?.customer_email ||
-        null;
-
-      if (!email && session.customer) {
-        try {
-          const cust = await stripe.customers.retrieve(session.customer);
-          email = cust?.email || null;
-        } catch { /* ignore */ }
-      }
-      if (!email) {
-        console.warn('checkout.session.completed: no customer email — skipping owner creation.');
-        return res.json({ received: true, warning: 'no_email' });
-      }
-      const emailLC = String(email).toLowerCase();
-
-      // Ensure/prepare owner User
-      let user = await User.findOne({ email: emailLC });
-      let isNewUser = false;
-      let tempPassword = null;
-      let ownerPasswordHash = null;
-
-      if (!user) {
-        isNewUser = true;
-        tempPassword = genTempPassword(12);
-        ownerPasswordHash = await bcrypt.hash(tempPassword, 12);
-
-        user = await User.create({
-          email: emailLC,
-          role: 'user',
-          passwordHash: ownerPasswordHash,
-          mustChangePassword: true,
-          isActive: true,
-        });
-      } else {
-        if (!user.passwordHash) {
-          isNewUser = true; // treat as new for emailing
-          tempPassword = genTempPassword(12);
-          ownerPasswordHash = await bcrypt.hash(tempPassword, 12);
-          await User.updateOne(
-            { _id: user._id },
-            { passwordHash: ownerPasswordHash, mustChangePassword: true, isActive: true }
-          );
-        } else {
-          ownerPasswordHash = user.passwordHash;
-        }
-      }
-
-      // Create Production ONLY here (confirmed payment)
       if (!prod) {
-        try {
-          prod = await Production.create({
-            title,
-            slug,
-            ownerUserId: user._id,
-            owner: user._id,
-            members: [
-              {
+        const created = await Production.create({
+          title,
+          slug,
+          ownerUserId: user?._id || null,
+          owner: user?._id || null,
+          members: user
+            ? [{
                 user: user._id,
                 role: 'admin',
                 siteAuthorized: true,
                 addedAt: new Date(),
-                email: emailLC,           // <-- email on member
-                passwordHash: ownerPasswordHash, // <-- passwordHash on member
-              },
-            ],
-            stripe: {
-              checkoutSessionId: session.id,
-              paymentIntentId: session.payment_intent,
-              amount: session.amount_total ?? null,
-              currency,
-            },
-            isActive: true,
-          });
-        } catch (e) {
-          if (e?.code === 11000) {
-            prod = await Production.findOne({ slug }).lean();
-          } else {
-            throw e;
-          }
-        }
+                email: (user.email || '').toLowerCase(),
+                // member.passwordHash will be set right after via ensureOwnerFromProduction
+              }]
+            : [],
+          stripe: {
+            checkoutSessionId: session.id,
+            paymentIntentId: session.payment_intent,
+            amount: session.amount_total ?? null,
+            currency,
+            status: 'active',
+          },
+          isActive: true,
+        });
+        prod = created.toObject();
       } else {
-        // Ensure stripe & activation updated on an existing record
         await Production.updateOne(
           { _id: prod._id },
           {
@@ -323,51 +418,33 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
               'stripe.paymentIntentId': session.payment_intent,
               'stripe.amount': session.amount_total ?? prod?.stripe?.amount ?? null,
               'stripe.currency': currency,
+              'stripe.status': 'active',
               isActive: true,
+              ...(user ? { ownerUserId: user._id, owner: user._id } : {}),
             },
           }
         );
+        prod = await Production.findById(prod._id).lean();
       }
 
-      // Ensure membership + owner pointers + user.productionIds are consistent
-      await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prod._id } });
-      await Production.updateOne(
-        { _id: prod._id, 'members.user': { $ne: user._id } },
-        {
-          $addToSet: {
-            members: {
-              user: user._id,
-              role: 'admin',
-              siteAuthorized: true,
-              email: emailLC,
-              passwordHash: ownerPasswordHash,
-            },
-          },
-        }
-      );
-      await Production.updateOne(
-        { _id: prod._id, ownerUserId: { $ne: user._id } },
-        { $set: { ownerUserId: user._id, owner: user._id } }
-      );
+      if (user) {
+        await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prod._id } });
+      }
 
-      // If a member entry already existed, sync its email/passwordHash
-      await Production.updateOne(
-        { _id: prod._id, 'members.user': user._id },
-        { $set: { 'members.$.email': emailLC, 'members.$.passwordHash': ownerPasswordHash } }
-      );
+      // NOW: issue per-production temp password for the new prod and email it
+      const ensuredTenant = await ensureOwnerFromProduction(prod, emailLC);
+      const tempPassword = ensuredTenant.tempPassword;
 
-      // Email temp password only when we actually created/updated a password for this owner
-      if (isNewUser && tempPassword) {
+      if (user && tempPassword) {
         try {
           await sendTempPasswordEmail({
             to: user.email,
             name: user.name || '',
             tempPassword,
-            productionTitle: title,
-            loginPath: LOGIN_PATH,
+            productionTitle: prod.title || title || 'your production',
           });
         } catch (mailErr) {
-          console.error('Temp password email failed:', mailErr.message);
+          console.error('Temp password email (fallback) failed:', mailErr.message);
         }
       }
 
@@ -378,12 +455,11 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
     }
   }
 
-  // Other events: acknowledge without side-effects
   return res.json({ received: true });
 });
 
 /* ---------------------- JSON / logging (AFTER webhook) --------------------- */
-app.use(express.json());             // <-- JSON parser for body routes
+app.use(express.json());
 app.use(morgan('dev'));
 
 /* -------------------------------- Mongo -------------------------------- */
@@ -396,9 +472,36 @@ app.use('/tenant/ocr', ocrRouter);
 app.use('/tenant/runsheetsbyhand', runsheetHandRouter);
 app.use('/owner/productions', ownerRoutes);
 app.use('/tenant/tenantauth', tenantAuthRouter);
-app.use('/pwr', passwordResetRoutes); 
+app.use('/pwr', passwordResetRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// Debug SMTP using the SAME transport as the app (utils/mailer.js)
+app.get('/debug/smtp', async (_req, res) => {
+  try {
+    const to = process.env.SMTP_TEST_TO || process.env.SMTP_USER || process.env.MAIL_FROM;
+    const info = await sendMail({
+      to,
+      subject: 'SMTP test from server/index.js',
+      text: 'If you see this, SMTP works via utils/mailer.js transport.'
+    });
+    res.json({ ok: true, messageId: info.messageId });
+  } catch (err) {
+    console.error('[SMTP DEBUG] send failed:', {
+      code: err.code,
+      command: err.command,
+      response: err.response,
+      message: err.message,
+    });
+    res.status(500).json({
+      ok: false,
+      code: err.code,
+      command: err.command,
+      response: err.response,
+      message: err.message
+    });
+  }
+});
 
 // Public: resolve by slug
 app.get('/productions/by-slug/:slug', async (req, res) => {
@@ -419,47 +522,74 @@ app.get('/stripe/check', async (_req, res) => {
 });
 
 /* ---------------------- Create Checkout Session ---------------------- */
-/**
- * Improvements:
- *  - uses express.json() (already registered above)
- *  - auto-finds an available slug (no 409 blocker)
- *  - includes title + desiredSlug in metadata
- */
 app.post('/checkout/session', async (req, res) => {
   try {
-    const { title, production } = req.body || {};
-    const cleanTitle = String(title || production?.title || '').trim();
-    if (!cleanTitle) return res.status(400).json({ error: 'Title required' });
+    const { contact, production } = req.body || {};
+    const cleanTitle = String(production?.title || '').trim();
+    if (!cleanTitle) return res.status(400).json({ error: 'production.title required' });
 
     const baseSlug = normalizeSlug(production?.slug || cleanTitle);
-    if (!baseSlug) return res.status(400).json({ error: 'Slug required' });
+    if (!baseSlug) return res.status(400).json({ error: 'production.slug required' });
 
     const uniqueSlug = await findAvailableSlug(baseSlug);
 
-    const price = parseInt(process.env.PRICE_CENTS || '9900', 10);
+    let ownerUserId = null;
+    const contactEmail = String(contact?.email || '').trim().toLowerCase();
+    if (contactEmail) {
+      const existing = await User.findOne({ email: contactEmail }).select('_id').lean();
+      ownerUserId = existing?._id || null;
+    }
+
+    const tempProd = await Production.create({
+      title: cleanTitle,
+      slug: uniqueSlug,
+      ownerUserId,
+      members: [],
+      stripe: { status: 'pending' },
+      isActive: false,
+      // canonical new fields
+      productionphone:   production?.phone || '',
+      productionaddress: production?.address || '',
+      productioncompany: production?.company || '',
+      // legacy aliases
+      name:    cleanTitle,
+      phone:   production?.phone || '',
+      address: production?.address || '',
+      company: production?.company || '',
+    });
+
+    const priceCents = parseInt(process.env.PRICE_CENTS || '9900', 10);
     const currency = (process.env.CURRENCY || 'usd').toLowerCase();
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      // payment_method_types: ['card'], // optional with modern Stripe; automatic selection works too
-      success_url: `${ORIGIN}/thank-you?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${ORIGIN}/?canceled=1`,
-      customer_creation: 'always',
+      success_url: `${ORIGIN}/thank-you?slug=${encodeURIComponent(uniqueSlug)}&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${ORIGIN}/pricing?canceled=1`,
+      customer_email: contactEmail || undefined,
+      client_reference_id: String(tempProd._id),
       line_items: [
         {
           quantity: 1,
           price_data: {
             currency,
             product_data: { name: `Set-Dec Production: ${cleanTitle}` },
-            unit_amount: price,
+            unit_amount: priceCents,
           },
         },
       ],
-      metadata: { title: cleanTitle, desiredSlug: uniqueSlug },
+      metadata: {
+        productionId: String(tempProd._id),
+        title: cleanTitle,
+        desiredSlug: uniqueSlug,
+      },
     });
 
-    // Return URL + the slug we reserved in metadata
-    return res.json({ url: session.url, slug: uniqueSlug });
+    await Production.updateOne(
+      { _id: tempProd._id },
+      { $set: { 'stripe.checkoutSessionId': session.id } }
+    );
+
+    return res.json({ url: session.url, slug: uniqueSlug, productionId: String(tempProd._id) });
   } catch (e) {
     const detail = e?.raw || e;
     console.error('Create Checkout Session error:', {
@@ -478,28 +608,34 @@ app.post('/checkout/session', async (req, res) => {
 
 /**
  * Thank-You resolver with PAID fallback.
- * - If webhook already created the production → return it.
- * - If not, but Stripe says the session is PAID → create it here (idempotent),
- *   ensure owner user + member with { email, passwordHash }, issue short-lived token.
+ * If webhook missed, we finish provisioning here and ALWAYS send a per-production temp password.
  */
 app.get('/checkout/sessions/:id', async (req, res) => {
   try {
     const session = await stripe.checkout.sessions.retrieve(req.params.id);
     const meta = session.metadata || {};
-    const title = (meta.title || 'Production').trim();
-    const slug  = normalizeSlug(meta.desiredSlug || title);
+    const slug  = normalizeSlug(meta.desiredSlug || meta.title || '') || null;
     const currency = (session.currency ?? process.env.CURRENCY) || 'usd';
     const isPaid = String(session.payment_status || '').toLowerCase() === 'paid';
+    const prodId = meta.productionId || session.client_reference_id || null;
 
-    let prod = await Production.findOne({
-      $or: [
-        { 'stripe.checkoutSessionId': session.id },
-        { 'stripe.paymentIntentId': session.payment_intent },
-        { slug },
-      ],
-    }).lean();
+    let prod = null;
+    if (prodId) prod = await Production.findById(prodId).lean();
+    if (!prod && slug) prod = await Production.findOne({ slug }).lean();
 
-    if (!prod && !isPaid) {
+    let email =
+      session?.customer_details?.email ||
+      session?.customer_email ||
+      null;
+    if (!email && session.customer) {
+      try {
+        const cust = await stripe.customers.retrieve(session.customer);
+        email = cust?.email || null;
+      } catch { /* ignore */ }
+    }
+    const emailLC = email ? String(email).toLowerCase() : null;
+
+    if ((!prod || prod?.isActive !== true) && !isPaid) {
       return res.status(202).json({
         status: session.status,
         payment_status: session.payment_status,
@@ -508,165 +644,77 @@ app.get('/checkout/sessions/:id', async (req, res) => {
       });
     }
 
-    let email =
-      session?.customer_details?.email ||
-      session?.customer_email ||
-      null;
-
-    if (!email && session.customer) {
-      try {
-        const cust = await stripe.customers.retrieve(session.customer);
-        email = cust?.email || null;
-      } catch { /* ignore */ }
-    }
-
-    if (!prod && !email) {
-      return res.status(202).json({
-        status: session.status,
-        payment_status: session.payment_status,
-        pending: true,
-        message: 'Payment confirmed but purchaser email missing; cannot finish provisioning yet.',
-      });
-    }
-
-    const emailLC = email ? String(email).toLowerCase() : null;
-
     let user = null;
-    let token = null;
-    let me = null;
+    let tempPassword = null;
+    let ownerPasswordHash = null;
 
-    if (!prod && isPaid) {
-      // Ensure/prepare owner User
-      user = await User.findOne({ email: emailLC });
-      let isNewUser = false;
-      let tempPassword = null;
-      let ownerPasswordHash = null;
+    if (isPaid && prod && prod.isActive !== true) {
+      // Issue per-production temp password + wire owner/admin member
+      const ensured = await ensureOwnerFromProduction(prod, emailLC);
+      user = ensured.user;
+      tempPassword = ensured.tempPassword;
+      ownerPasswordHash = ensured.ownerPasswordHash;
 
-      if (!user) {
-        isNewUser = true;
-        tempPassword = crypto.randomBytes(9).toString('base64url');
-        ownerPasswordHash = await bcrypt.hash(tempPassword, 12);
-
-        user = await User.create({
-          email: emailLC,
-          role: 'user',
-          passwordHash: ownerPasswordHash,
-          mustChangePassword: true,
-          isActive: true,
-        });
-      } else {
-        if (!user.passwordHash) {
-          isNewUser = true;
-          tempPassword = crypto.randomBytes(9).toString('base64url');
-          ownerPasswordHash = await bcrypt.hash(tempPassword, 12);
-          await User.updateOne(
-            { _id: user._id },
-            { passwordHash: ownerPasswordHash, mustChangePassword: true, isActive: true }
-          );
-        } else {
-          ownerPasswordHash = user.passwordHash;
-        }
-      }
-
-      // Create production now (idempotent via duplicate slug handling)
-      try {
-        const created = await Production.create({
-          title,
-          slug,
-          ownerUserId: user._id,
-          owner: user._id,
-          members: [
-            {
-              user: user._id,
-              role: 'admin',
-              siteAuthorized: true,
-              addedAt: new Date(),
-              email: emailLC,
-              passwordHash: ownerPasswordHash,
-            },
-          ],
-          stripe: {
-            checkoutSessionId: session.id,
-            paymentIntentId: session.payment_intent,
-            amount: session.amount_total ?? null,
-            currency,
-          },
-          isActive: true,
-        });
-        prod = created.toObject();
-      } catch (e) {
-        if (e?.code === 11000) {
-          prod = await Production.findOne({ slug }).lean();
-        } else {
-          throw e;
-        }
-      }
-
-      // Consistency updates (no-ops if already set)
-      await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prod._id } });
       await Production.updateOne(
-        { _id: prod._id, 'members.user': { $ne: user._id } },
+        { _id: prod._id },
         {
-          $addToSet: {
-            members: {
-              user: user._id,
-              role: 'admin',
-              siteAuthorized: true,
-              email: emailLC,
-              passwordHash: user.passwordHash,
-            },
+          $set: {
+            isActive: true,
+            ...(user ? { ownerUserId: user._id, owner: user._id } : {}),
+            'stripe.status': 'active',
+            'stripe.checkoutSessionId': session.id,
+            'stripe.paymentIntentId': session.payment_intent,
+            'stripe.amount': session.amount_total ?? prod?.stripe?.amount ?? null,
+            'stripe.currency': currency,
           },
         }
       );
-      await Production.updateOne(
-        { _id: prod._id, 'members.user': user._id },
-        { $set: { 'members.$.email': emailLC, 'members.$.passwordHash': user.passwordHash } }
-      );
 
-      if (isNewUser && user.passwordHash && tempPassword) {
-        try {
-          await sendTempPasswordEmail({
-            to: user.email,
-            name: user.name || '',
-            tempPassword,
-            productionTitle: title,
-            loginPath: LOGIN_PATH,
-          });
-        } catch (mailErr) {
-          console.error('Temp password email (fallback) failed:', mailErr.message);
-        }
+      if (user) {
+        await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prod._id } });
+        await Production.updateOne(
+          { _id: prod._id, 'members.user': { $ne: user._id } },
+          {
+            $addToSet: {
+              members: {
+                user: user._id,
+                role: 'admin',
+                siteAuthorized: true,
+                email: (user.email || '').toLowerCase(),
+                passwordHash: ownerPasswordHash,
+                addedAt: new Date(),
+              },
+            },
+          }
+        );
+      }
+
+      prod = await Production.findById(prod._id).lean();
+    }
+
+    // Always email the per-production temp password we generated
+    if (user && tempPassword) {
+      try {
+        await sendTempPasswordEmail({
+          to: user.email,
+          name: user.name || '',
+          tempPassword,
+          productionTitle: prod?.title || 'your production',
+          loginPath: LOGIN_PATH,
+        });
+      } catch (mailErr) {
+        console.error('Temp password email (fallback) failed:', mailErr.message);
       }
     }
 
-    if (!prod) {
-      return res.status(202).json({
-        status: session.status,
-        payment_status: session.payment_status,
-        pending: true,
-        message: 'Provisioning delay detected; please retry in a moment.',
-      });
-    }
+    if (!prod) return res.status(404).json({ error: 'Production not found' });
 
-    if (!user && emailLC) {
-      user = await User.findOne({ email: emailLC }).lean();
-    }
-
-    if (user) {
-      await User.updateOne({ _id: user._id }, { $addToSet: { productionIds: prod._id } });
-      await Production.updateOne(
-        { _id: prod._id, 'members.user': { $ne: user._id } },
-        { $addToSet: { members: { user: user._id, role: 'admin', siteAuthorized: true, email: emailLC } } }
-      );
-      await Production.updateOne(
-        { _id: prod._id, 'members.user': user._id },
-        { $set: { 'members.$.email': emailLC } }
-      );
-
-      token = issueJwt(user, { expiresIn: '12h' });
-      me = await User.findById(user._id)
-        .select('_id email firstName lastName role siteAuthorized isAdmin productionIds')
-        .lean();
-    }
+    const token = user ? issueJwt(user, { expiresIn: '12h' }) : null;
+    const me = user
+      ? await User.findById(user._id)
+          .select('_id email firstName lastName role siteAuthorized isAdmin productionIds')
+          .lean()
+      : null;
 
     return res.json({
       status: session.status,
@@ -692,22 +740,24 @@ app.get('/tenant/productions/by_slug/:slug', async (req, res) => {
 });
 
 /* ----------------------------- Tenant routes ------------------------------ */
-
-app.use('/tenant/productions',tenantGate({ authorized: true, admin: false }), productionRoutes);
-app.use('/tenant/users',tenantGate({ authorized: true, admin: true }), userRoutes);
-app.use('/tenant/runsheets',tenantGate({ authorized: true, admin: false }),runsheetRoutes);
-app.use('/tenant/items',tenantGate({ authorized: true, admin: false }), itemRoutes);
-app.use('/tenant/places',tenantGate({ authorized: true, admin: false }),placeRoutes);
-app.use('/tenant/suppliers',tenantGate({ authorized: true, admin: false }),supplierRoutes);
-app.use('/tenant/people',tenantGate({ authorized: true, admin: false }), peopleRoutes);
-app.use('/tenant/admin',tenantGate({ authorized: true, admin: true }), adminUsersRouter);
+app.use('/tenant/productions', tenantGate({ authorized: true, admin: false }), productionRoutes);
+app.use('/tenant/users', tenantGate({ authorized: true, admin: true }), userRoutes);
+app.use('/tenant/runsheets', tenantGate({ authorized: true, admin: false }), runsheetRoutes);
+app.use('/tenant/items', tenantGate({ authorized: true, admin: false }), itemRoutes);
+app.use('/tenant/places', tenantGate({ authorized: true, admin: false }), placeRoutes);
+app.use('/tenant/suppliers', tenantGate({ authorized: true, admin: false }), supplierRoutes);
+app.use('/tenant/people', tenantGate({ authorized: true, admin: false }), peopleRoutes);
+app.use('/tenant/admin', tenantGate({ authorized: true, admin: true }), adminUsersRouter);
 app.use('/tenant/sets', tenantGate({ authorized: true, admin: false }), setRoutes);
 
 // Misc tenant endpoints
-app.use('/tenant',tenantGate({ authorized: true, admin: true }), tenantRouter);
+app.use('/tenant', tenantGate({ authorized: true, admin: true }), tenantRouter);
 
 /* --------------------------------- Boot --------------------------------- */
 const PORT = process.env.PORT || 4001;
 app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`));
+
+
+
 
 

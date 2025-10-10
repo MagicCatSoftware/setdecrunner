@@ -120,7 +120,7 @@ const isAuthed = computed(() => !!tokenRef.value);
 .container { max-width: 1100px; margin: 0 auto; }
 .brand { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
 .brand__logo {
-  height: 28px;
+  height: 125px;
   width: auto;
   border-radius: 6px;
   object-fit: contain;
