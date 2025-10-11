@@ -468,8 +468,8 @@ await mongoose.connect(process.env.MONGODB_URI);
 /* -------------------------------- Public routes --------------------------- */
 app.use('/auth', authRouter);
 app.use('/tenant/auth', authRouter);
-app.use('/tenant/ocr', ocrRouter);
-app.use('/tenant/runsheetsbyhand', runsheetHandRouter);
+app.use('/tenant/ocr', bearerAuth, tenantGate({ authorized: true, admin: false }), ocrRouter);
+app.use('/tenant/runsheetsbyhand',bearerAuth, tenantGate({ authorized: true, admin: false }), runsheetHandRouter);
 app.use('/owner/productions', ownerRoutes);
 app.use('/tenant/tenantauth', tenantAuthRouter);
 app.use('/pwr', passwordResetRoutes);
@@ -510,6 +510,32 @@ app.get('/productions/by-slug/:slug', async (req, res) => {
   if (!prod) return res.status(404).json({ error: 'Production not found' });
   res.json(prod);
 });
+
+// Public: resolve production by slug with contact fields
+app.get('/tenant/getproductions/by_slug/:slug',bearerAuth,tenantGate({ authorized: true, admin: false }), async (req, res) => {
+  const slug = normalizeSlug(req.params.slug || '');
+  const prod = await Production.findOne({ slug }).select(
+    '_id slug title name company address phone productioncompany productionaddress productionphone'
+  ).lean();
+
+  if (!prod) return res.status(404).json({ error: 'Production not found' });
+
+  // Normalize to stable keys the client can rely on
+  const name    = prod.name    || prod.title || '';
+  const company = prod.company || prod.productioncompany || '';
+  const phone   = prod.phone   || prod.productionphone   || '';
+  const address = prod.address || prod.productionaddress || '';
+
+  res.json({
+    _id: prod._id,
+    slug: prod.slug,
+    name,
+    company,
+    phone,
+    address
+  });
+});
+
 
 // Stripe account probe (dev helper)
 app.get('/stripe/check', async (_req, res) => {
