@@ -12,6 +12,9 @@
         <button class="btn btn--primary" @click="goNew">New Supplier</button>
       </div>
 
+      <input ref="fileEl" type="file" class="hidden" accept=".xlsx,.xls,.csv" @change="onImportFile" />
+<button class="btn" @click="fileEl.click()">Import Excel/CSV</button>
+
       <!-- Map Panel -->
       <div class="card map-card">
         <div class="map-head">
@@ -63,7 +66,33 @@ const me = ref(null);
 const q = ref('');
 const suppliers = ref([]);
 const error = ref('');
+const fileEl = ref(null);
 
+async function onImportFile(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+
+    // Pass slug so backend can resolve productionId if needed
+    await api.post(`/tenant/suppliers/import?slug=${encodeURIComponent(slug.value)}`, fd, {
+      multipart: true
+    });
+
+    // reload list + markers
+    await load();
+    await nextTick();
+    updateMarkers();
+    alert('Import complete.');
+  } catch (err) {
+    alert(err?.body?.error || err?.message || 'Import failed');
+  } finally {
+    // reset input so selecting the same file triggers change again
+    e.target.value = '';
+  }
+}
 
 const GMAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
