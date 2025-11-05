@@ -5,7 +5,7 @@
   <section class="purchase container">
     <header class="head">
       <h1>Checkout</h1>
-      <p class="muted">Complete your purchase securely. Alpha 1.0 (test only).</p>
+      <p class="muted">Complete your purchase securely.</p>
     </header>
 
     <div class="layout">
@@ -15,15 +15,12 @@
 
         <div class="summary__row">
           <span>Plan</span>
-          <strong class="mono">{{ planTitle(form.plan) }}</strong>
+          <strong class="mono">Lifetime</strong>
         </div>
 
         <div class="summary__row">
           <span>Price</span>
-          <strong class="mono">
-            <template v-if="Number.isFinite(form.price)">$ {{ form.price }}/mo</template>
-            <template v-else>—</template>
-          </strong>
+          <strong class="mono">$ 99.99 <small>one-time</small></strong>
         </div>
 
         <hr />
@@ -46,22 +43,6 @@
 
       <!-- Right: Billing/contact form -->
       <form class="card form" @submit.prevent="submit">
-        <div class="row">
-          <label>
-            <span>Plan</span>
-            <select v-model="form.plan" class="input select" @change="syncPrice">
-              <option value="starter">Starter — $0/mo</option>
-              <option value="studio">Studio — $29/mo</option>
-              <option value="lot">Lot — $79/mo</option>
-            </select>
-          </label>
-
-          <label>
-            <span>Price (USD / mo)</span>
-            <input class="input" type="number" v-model.number="form.price" min="0" step="1" />
-          </label>
-        </div>
-
         <div class="row">
           <label>
             <span>Contact name</span>
@@ -115,7 +96,7 @@
         </div>
 
         <div class="actions">
-          <button class="btn" type="submit" :disabled="loading">
+          <button class="btn btn--primary" type="submit" :disabled="loading">
             {{ loading ? 'Processing…' : 'Proceed to Checkout' }}
           </button>
           <RouterLink class="btn btn--ghost" to="/pricing">Back</RouterLink>
@@ -136,24 +117,27 @@ import { reactive, ref, onMounted } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import PublicNav from '../components/PublicNav.vue';
 import PublicFooter from '../components/PublicFooter.vue';
-import api from '../api.js'; // ensure this exports a .post method
+import api from '../api.js';
 
 const route = useRoute();
 const loading = ref(false);
 
-const PRICE_MAP = { starter: 0, studio: 29, lot: 79 };
+// Lock to single option
+const PLAN = 'lifetime';
+const PRICE_DISPLAY = '99.99'; // shown to user
+// If your server expects cents, convert there; keep this as display on client.
 
 const form = reactive({
-  // pricing
-  plan: 'studio',
-  price: PRICE_MAP.studio,
+  // locked pricing
+  plan: PLAN,
+  price: PRICE_DISPLAY,
 
   // billing contact
   name: '',
   email: '',
   address: '',
 
-  // production details
+  // production details (prefilled from pricing query)
   productionName: '',
   productionSlug: '',
   productionAddress: '',
@@ -161,22 +145,8 @@ const form = reactive({
   productionCompany: '',
 });
 
-function planTitle(plan) {
-  if (plan === 'starter') return 'Starter';
-  if (plan === 'studio') return 'Studio';
-  if (plan === 'lot') return 'Lot';
-  return String(plan || '—');
-}
-
-function syncPrice() {
-  form.price = PRICE_MAP[form.plan] ?? 0;
-}
-
 onMounted(() => {
-  const q = route.query;
-  if (q.plan) form.plan = String(q.plan);
-  form.price = q.price ? Number(q.price) : (PRICE_MAP[form.plan] ?? 0);
-
+  const q = route.query || {};
   form.productionName     = String(q.productionname || '');
   form.productionSlug     = String(q.productionslug || '');
   form.productionAddress  = String(q.productionaddress || '');
@@ -190,38 +160,40 @@ async function submit() {
 
     // Minimal client-side validation
     for (const key of [
-      'plan', 'price', 'name', 'email', 'address',
+      'name', 'email', 'address',
       'productionName', 'productionSlug', 'productionAddress',
       'productionPhone', 'productionCompany'
     ]) {
-      if (!String(form[key])) {
+      if (!String(form[key]).trim()) {
         alert('Please complete all fields.');
         loading.value = false;
         return;
       }
     }
 
-    // Prepare payload for server-side checkout session (Stripe)
+    // Payload is locked to the single plan/price
     const payload = {
-  plan: form.plan,
-  price: Number(form.price),
-  contact: { name: form.name, email: form.email, address: form.address },
-  production: {
-    title:   form.productionName,
-    slug:    form.productionSlug,
-    address: form.productionAddress,
-    phone:   form.productionPhone,
-    company: form.productionCompany,
-  },
-  // keep slug also top-level for convenience if you like
-  productionSlug: form.productionSlug
-};
+      plan: PLAN,
+      price: PRICE_DISPLAY,
+      contact: {
+        name: form.name,
+        email: form.email,
+        address: form.address,
+      },
+      production: {
+        title:   form.productionName,
+        slug:    form.productionSlug,
+        address: form.productionAddress,
+        phone:   form.productionPhone,
+        company: form.productionCompany,
+      },
+      productionSlug: form.productionSlug,
+    };
 
-    // Call your backend to create a checkout session
-    // Adjust endpoint if your server uses a different path.
+    // Call backend to create a checkout session (adjust path if needed)
+    // Example endpoint; keep using whatever your server exposes:
+    //   POST /checkout/session  ->  { url: "https://checkout.stripe.com/..." }
     const { url } = await api.post('/checkout/session', payload);
-    console.log(url);
-    // Redirect to payment provider
     window.location.href = url;
   } catch (err) {
     console.error(err);

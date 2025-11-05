@@ -1,108 +1,123 @@
 <template>
-    <div>
-      <NavBar :me="me" />
-  
-      <div class="container">
-        <div class="row">
-          <RouterLink class="btn" to="/people">Back to People</RouterLink>
-          <span class="spacer"></span>
-          <button class="btn btn--danger" v-if="!isNew && me?.role==='admin'" @click="destroy">Delete</button>
-        </div>
-  
-        <h2>{{ isNew ? 'Create Person' : 'Edit Person' }}</h2>
-  
-        <div v-if="error" class="error">{{ error }}</div>
-  
-        <!-- Photo -->
-        <div class="field">
-          <div class="label">Photo</div>
-          <div v-if="s.photo" class="person-photo-wrapper">
-  <img :src="imageUrl(s.photo)" alt="Person photo" class="person-photo" />
-  <button class="btn" :disabled="isNew" @click="removePhoto">Remove Photo</button>
-</div>
-          <div style="margin-top:8px;">
-            <input type="file" accept="image/*" :disabled="isNew" @change="uploadPhoto" />
-            <div class="muted" v-if="isNew">Save first to enable photo upload.</div>
-          </div>
-        </div>
-  
-        <div class="field">
-          <label class="label" for="p-name">Name</label>
-          <input id="p-name" v-model="s.name" />
-        </div>
-  
-        <div class="field">
-          <label class="label" for="p-email">Email</label>
-          <input id="p-email" v-model="s.email" />
-        </div>
-  
-        <div class="field">
-          <label class="label" for="p-phone">Phone</label>
-          <input id="p-phone" v-model="s.phone" />
-        </div>
-  
-        <div class="field">
-          <label class="label" for="p-role">Role/Title</label>
-          <input id="p-role" v-model="s.role" placeholder="e.g. On-set contact" />
-        </div>
-  
-        <div class="field">
-          <label class="label" for="p-notes">Notes</label>
-          <textarea id="p-notes" v-model="s.notes" rows="3" placeholder="Any extra info for this person"></textarea>
-        </div>
-  
-        <!-- Link to App User (optional) -->
-        <section class="panel">
-          <h3 class="subtitle">Link to App User (optional)</h3>
-          <div class="row row--tight">
-            <input v-model="userQuery" placeholder="Search users…" />
-            <button class="btn" @click="searchUsers">Search</button>
-            <div class="muted" v-if="s.user">Linked: {{ linkedUserLabel }}</div>
-          </div>
-  
-          <div class="pillbar">
-            <button
-              v-for="u in userResults"
-              :key="u._id"
-              class="pill"
-              @click="linkUser(u)"
-            >
-              Link {{ u.name || u.email }}
-            </button>
-            <button v-if="s.user" class="pill" @click="clearUser">Unlink</button>
-          </div>
-        </section>
-  
-        <button class="btn btn--primary" @click="save" :disabled="saving">
-          {{ saving ? 'Saving…' : (isNew ? 'Create' : 'Save') }}
+  <div>
+    <NavBar :me="me" />
+
+    <div class="container">
+      <div class="row">
+        <!-- 🔁 use named route + slug param -->
+        <RouterLink
+          class="btn"
+          :to="{ name: 'people', params: { slug } }"
+        >
+          Back to People
+        </RouterLink>
+        <span class="spacer"></span>
+        <button class="btn btn--danger" v-if="!isNew && me?.role==='admin'" @click="destroy">
+          Delete
         </button>
-        <span class="muted" v-if="savedAt">Saved {{ savedAt }}</span>
       </div>
+
+      <h2>{{ isNew ? 'Create Person' : 'Edit Person' }}</h2>
+
+      <div v-if="error" class="error">{{ error }}</div>
+
+      <!-- Photo -->
+      <div class="field">
+        <div class="label">Photo</div>
+        <div v-if="s.photo" class="person-photo-wrapper">
+          <img :src="imageUrl(s.photo)" alt="Person photo" class="person-photo" />
+          <button class="btn" :disabled="isNew" @click="removePhoto">Remove Photo</button>
+        </div>
+        <div style="margin-top:8px;">
+          <input type="file" accept="image/*" :disabled="isNew" @change="uploadPhoto" />
+          <div class="muted" v-if="isNew">Save first to enable photo upload.</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label" for="p-name">Name</label>
+        <input id="p-name" v-model="s.name" />
+      </div>
+
+      <div class="field">
+        <label class="label" for="p-email">Email</label>
+        <input id="p-email" v-model="s.email" />
+      </div>
+
+      <div class="field">
+        <label class="label" for="p-phone">Phone</label>
+        <input id="p-phone" v-model="s.phone" />
+      </div>
+
+      <div class="field">
+        <label class="label" for="p-role">Role/Title</label>
+        <input id="p-role" v-model="s.role" placeholder="e.g. On-set contact" />
+      </div>
+
+      <div class="field">
+        <label class="label" for="p-notes">Notes</label>
+        <textarea
+          id="p-notes"
+          v-model="s.notes"
+          rows="3"
+          placeholder="Any extra info for this person"
+        ></textarea>
+      </div>
+
+      <!-- Link to App User (optional) -->
+      <section class="panel">
+        <h3 class="subtitle">Link to App User (optional)</h3>
+        <div class="row row--tight">
+          <input v-model="userQuery" placeholder="Search users…" />
+          <button class="btn" @click="searchUsers">Search</button>
+          <div class="muted" v-if="s.user">Linked: {{ linkedUserLabel }}</div>
+        </div>
+
+        <div class="pillbar">
+          <button
+            v-for="u in userResults"
+            :key="u._id"
+            class="pill"
+            @click="linkUser(u)"
+          >
+            Link {{ u.name || u.email }}
+          </button>
+          <button v-if="s.user" class="pill" @click="clearUser">Unlink</button>
+        </div>
+      </section>
+
+      <button class="btn btn--primary" @click="save" :disabled="saving">
+        {{ saving ? 'Saving…' : (isNew ? 'Create' : 'Save') }}
+      </button>
+      <span class="muted" v-if="savedAt">Saved {{ savedAt }}</span>
     </div>
-  </template>
-  
-  <script setup>
-  import { ref, onMounted, computed } from 'vue';
-  import { useRoute, useRouter, RouterLink } from 'vue-router';
-  import NavBar from '../components/NavBar.vue';
-  import { useAuth } from '../auth.js';
-  import api from '../api.js';
-  
-  const route = useRoute();
-  const router = useRouter();
-  const auth = useAuth();
-  
-  const me = ref(null);
-  const s = ref({ name: '', email: '', phone: '', role: '', notes: '', user: null, photo: null });
-  
-  const saving = ref(false);
-  const savedAt = ref('');
-  const error = ref('');
-  
-  const isNew = computed(() => route.name === 'person-new');
- 
-  const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
-  
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, computed } from 'vue';
+import { useRoute, useRouter, RouterLink } from 'vue-router';
+import NavBar from '../components/NavBar.vue';
+import { useAuth } from '../auth.js';
+import api from '../api.js';
+
+const route = useRoute();
+const router = useRouter();
+const auth = useAuth();
+
+const slug = computed(() => String(route.params.slug || ''));
+
+const me = ref(null);
+const s = ref({ name: '', email: '', phone: '', role: '', notes: '', user: null, photo: null });
+
+const saving = ref(false);
+const savedAt = ref('');
+const error = ref('');
+
+const isNew = computed(() => route.name === 'person-new');
+
+const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
+
 const IMAGE_BASE = import.meta.env.IMAGE_BASE || '/api'; // leave empty for same-origin
 
 function imageUrl(p) {
@@ -125,111 +140,116 @@ function imageUrl(p) {
   const file = parts.pop();
   return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
 }
-  
-  
-  const load = async () => {
-    if (isNew.value) return;
-    try {
-      s.value = await api.get(`/tenant/people/${route.params.id}`);
-    } catch (e) {
-      error.value = e?.response?.data?.error || 'Failed to load person';
-    }
-  };
-  
-  const save = async () => {
-    try {
-      saving.value = true; error.value = '';
-  
-      const payload = {
-        name: s.value.name,
-        email: s.value.email,
-        phone: s.value.phone,
-        role: s.value.role,
-        notes: s.value.notes,
-        user: s.value.user?._id ?? s.value.user ?? null,
-      };
-  
-      if (isNew.value) {
-        const created = await api.post('/tenant/people', payload);
-        s.value = created;
-        stamp();
-        router.replace({ name: 'person-edit', params: { id: created._id } });
-      } else {
-        s.value = await api.patch(`/tenant/people/${s.value._id}`, payload);
-        stamp();
-      }
-    } catch (e) {
-      error.value = e?.response?.data?.error || (isNew.value ? 'Failed to create' : 'Failed to save');
-    } finally {
-      saving.value = false;
-    }
-  };
-  
-  const destroy = async () => {
-    if (!confirm('Delete this person?')) return;
-    try {
-      await api.del(`/tenant/people/${s.value._id}`);
-      router.push('/people');
-    } catch (e) {
-      error.value = e?.response?.data?.error || 'Failed to delete';
-    }
-  };
-  
-  // ---- photo upload / remove ----
-  const uploadPhoto = async (ev) => {
-    if (!s.value?._id) return; // guard
-    const file = ev.target.files?.[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('photo', file);
-    try {
-      const updated = await api.post(`/tenant/people/${s.value._id}/photo`, fd, {
-        
+
+const load = async () => {
+  if (isNew.value) return;
+  try {
+    s.value = await api.get(`/tenant/people/${route.params.id}`);
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to load person';
+  }
+};
+
+const save = async () => {
+  try {
+    saving.value = true; error.value = '';
+
+    const payload = {
+      name: s.value.name,
+      email: s.value.email,
+      phone: s.value.phone,
+      role: s.value.role,
+      notes: s.value.notes,
+      user: s.value.user?._id ?? s.value.user ?? null,
+    };
+
+    if (isNew.value) {
+      const created = await api.post('/tenant/people', payload);
+      s.value = created;
+      stamp();
+      // 🔁 include slug when redirecting to editor
+      router.replace({
+        name: 'person-edit',
+        params: { slug: slug.value, id: created._id },
       });
-      s.value = updated;
+    } else {
+      s.value = await api.patch(`/tenant/people/${s.value._id}`, payload);
       stamp();
-    } catch (e) {
-      error.value = e?.response?.data?.error || 'Failed to upload photo';
-    } finally {
-      ev.target.value = '';
     }
-  };
-  
-  const removePhoto = async () => {
-    if (!s.value?._id) return;
-    try {
-      const updated = await api.del(`/tenant/people/${s.value._id}/photo`);
-      s.value = updated;
-      stamp();
-    } catch (e) {
-      error.value = e?.response?.data?.error || 'Failed to remove photo';
-    }
-  };
-  
-  // ---- link to user ----
-  const userQuery = ref('');
-  const userResults = ref([]);
-  const searchUsers = async () => {
-    try {
-      userResults.value = await api.get('/tenant/users', userQuery.value ? { q: userQuery.value } : undefined);
-    } catch (e) {
-      error.value = e?.response?.data?.error || 'Failed to search users';
-    }
-  };
-  const linkUser = (u) => { s.value.user = u; };
-  const clearUser = () => { s.value.user = null; };
-  const linkedUserLabel = computed(() => {
-    const u = s.value.user;
-    if (!u) return '';
-    if (typeof u === 'string') return `#${u}`;
-    return u.name || u.email || u._id;
-  });
-  
-  onMounted(async () => {
-    me.value = await auth.fetchMe();
-    await load();
-  });
-  </script>
+  } catch (e) {
+    error.value = e?.response?.data?.error || (isNew.value ? 'Failed to create' : 'Failed to save');
+  } finally {
+    saving.value = false;
+  }
+};
+
+const destroy = async () => {
+  if (!confirm('Delete this person?')) return;
+  try {
+    await api.del(`/tenant/people/${s.value._id}`);
+    // 🔁 go back to tenant-scoped people list
+    router.push({ name: 'people', params: { slug: slug.value } });
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to delete';
+  }
+};
+
+// ---- photo upload / remove ----
+const uploadPhoto = async (ev) => {
+  if (!s.value?._id) return; // guard
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('photo', file);
+  try {
+    const updated = await api.post(`/tenant/people/${s.value._id}/photo`, fd, {});
+    s.value = updated;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to upload photo';
+  } finally {
+    ev.target.value = '';
+  }
+};
+
+const removePhoto = async () => {
+  if (!s.value?._id) return;
+  try {
+    const updated = await api.del(`/tenant/people/${s.value._id}/photo`);
+    s.value = updated;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to remove photo';
+  }
+};
+
+// ---- link to user ----
+const userQuery = ref('');
+const userResults = ref([]);
+const searchUsers = async () => {
+  try {
+    userResults.value = await api.get(
+      '/tenant/users',
+      userQuery.value ? { q: userQuery.value } : undefined
+    );
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to search users';
+  }
+};
+const linkUser = (u) => { s.value.user = u; };
+const clearUser = () => { s.value.user = null; };
+const linkedUserLabel = computed(() => {
+  const u = s.value.user;
+  if (!u) return '';
+  if (typeof u === 'string') return `#${u}`;
+  return u.name || u.email || u._id;
+});
+
+onMounted(async () => {
+  me.value = await auth.fetchMe();
+  await load();
+});
+</script>
 
 <style scoped>
 /* ---------- Layout ---------- */

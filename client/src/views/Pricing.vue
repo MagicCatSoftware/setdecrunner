@@ -1,104 +1,126 @@
-<!-- client/src/views/Pricing.vue -->
 <template>
   <PublicNav />
 
   <section class="pricing container">
     <header class="pricing__head">
-      <h1>Simple pricing</h1>
-      <p class="muted">Start free. Upgrade when you need more drivers or storage.</p>
+      <h1>Simple one-time pricing</h1>
+      <p class="muted">Pay once. Use Set Dec Runner forever.</p>
     </header>
 
-    <!-- Production details (passed to Purchase page) -->
-    <form class="prodcard" @submit.prevent>
+    <!-- Production details -->
+    <form class="prodcard" @submit.prevent="go">
       <div class="row">
         <label>
           <span>Production Name</span>
-          <input class="input" v-model.trim="prod.productionName" type="text" @input="ensureSlug" required />
+          <input
+            class="input"
+            v-model.trim="prod.productionName"
+            type="text"
+            @input="ensureSlug"
+            required
+            autocomplete="organization"
+          />
         </label>
         <label>
           <span>Production Slug</span>
-          <input class="input" v-model.trim="prod.productionSlug" type="text" placeholder="lowercase-and-dashes" required />
+          <input
+            class="input"
+            v-model.trim="prod.productionSlug"
+            type="text"
+            placeholder="lowercase-and-dashes"
+            @input="prod.productionSlug = slugify(prod.productionSlug)"
+            required
+            autocapitalize="none"
+            autocomplete="off"
+          />
         </label>
       </div>
 
       <div class="row">
         <label class="grow">
           <span>Production Address</span>
-          <input class="input" v-model.trim="prod.productionAddress" type="text" required />
+          <input
+            class="input"
+            v-model.trim="prod.productionAddress"
+            type="text"
+            required
+            autocomplete="street-address"
+          />
         </label>
       </div>
 
       <div class="row">
         <label>
           <span>Production Phone</span>
-          <input class="input" v-model.trim="prod.productionPhone" type="tel" required />
+          <input
+            class="input"
+            v-model.trim="prod.productionPhone"
+            type="tel"
+            required
+            autocomplete="tel"
+          />
         </label>
         <label>
           <span>Production Company</span>
-          <input class="input" v-model.trim="prod.productionCompany" type="text" required />
+          <input
+            class="input"
+            v-model.trim="prod.productionCompany"
+            type="text"
+            required
+            autocomplete="organization"
+          />
         </label>
       </div>
 
-      <p class="hint muted">These details will be pre-filled on the checkout page. You can still edit them there.</p>
+      <p class="hint muted">
+        These details will be pre-filled on the checkout page. You can still edit them there.
+      </p>
     </form>
 
-    <!-- Plans -->
-    <div class="pricing__grid">
-      <article class="price" :class="{ selected: selectedPlan==='starter' }">
-        <h3>Starter</h3>
-        <div class="num">$0<span>/mo</span></div>
+    <!-- One-Time Plan -->
+    <div class="pricing__grid single">
+      <article class="price price--focus selected" aria-label="Lifetime plan">
+        <div class="badge">Lifetime Access</div>
+        <h3>Set Dec Runner Pro</h3>
+        <div class="num">$99.99<span> one-time</span></div>
         <ul>
-          <li>1 Coordinator</li>
-          <li>1 Driver PWA</li>
-          <li>50 items &amp; uploads</li>
-          <li>Email support</li>
+          <li>Unlimited Coordinators</li>
+          <li>Unlimited Drivers</li>
+          <li>Unlimited Items & Uploads</li>
+          <li>Lifetime Updates</li>
+          <li>Priority Support</li>
         </ul>
-        <button class="btn" @click="go('starter')">Choose Starter</button>
-      </article>
-
-      <article class="price price--focus" :class="{ selected: selectedPlan==='studio' }" aria-label="Studio plan">
-        <div class="badge">Most popular</div>
-        <h3>Studio</h3>
-        <div class="num">$29<span>/mo</span></div>
-        <ul>
-          <li>3 Coordinators</li>
-          <li>Up to 5 drivers</li>
-          <li>1,000 items &amp; uploads</li>
-          <li>Priority support</li>
-        </ul>
-        <button class="btn" @click="go('studio')">Choose Studio</button>
-      </article>
-
-      <article class="price" :class="{ selected: selectedPlan==='lot' }">
-        <h3>Lot</h3>
-        <div class="num">$79<span>/mo</span></div>
-        <ul>
-          <li>Unlimited coordinators</li>
-          <li>Unlimited drivers</li>
-          <li>Unlimited items</li>
-          <li>SLA &amp; SSO</li>
-        </ul>
-        <button class="btn" @click="go('lot')">Choose Lot</button>
+        <button
+          class="btn btn--primary"
+          type="submit"
+          :disabled="!isValid"
+          @click.prevent="go"
+        >
+          Buy Now
+        </button>
       </article>
     </div>
 
     <p class="fineprint">
-      Prices in USD. Cancel anytime. Taxes may apply.
+      Price in USD. One-time payment. Lifetime license. Taxes may apply.
     </p>
   </section>
-  <PublicFooter/>
+
+  <PublicFooter />
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue';
+import { reactive, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import PublicNav from '../components/PublicNav.vue';
 import PublicFooter from '../components/PublicFooter.vue';
 
 const router = useRouter();
 
-const prices = { starter: 0, studio: 29, lot: 79 };
-const selectedPlan = ref('');
+// hard-coded product config
+const PLAN = 'lifetime';
+const PRICE_DISPLAY = '99.99'; // shown to user
+// (If you use cents on the server, convert there; this stays as display.)
 
 const prod = reactive({
   productionName: '',
@@ -108,7 +130,7 @@ const prod = reactive({
   productionCompany: '',
 });
 
-function slugify(s) {
+function slugify(s = '') {
   return s
     .toLowerCase()
     .replace(/['"]/g, '')
@@ -123,29 +145,28 @@ function ensureSlug() {
   }
 }
 
-function validateProd() {
-  return (
-    prod.productionName &&
-    prod.productionSlug &&
-    prod.productionAddress &&
-    prod.productionPhone &&
-    prod.productionCompany
-  );
-}
+const isValid = computed(() =>
+  !!prod.productionName &&
+  !!prod.productionSlug &&
+  !!prod.productionAddress &&
+  !!prod.productionPhone &&
+  !!prod.productionCompany
+);
 
-function go(plan) {
-  selectedPlan.value = plan;
-  if (!validateProd()) {
+function go() {
+  if (!isValid.value) {
     alert('Please fill in all production fields first.');
     return;
   }
-  const price = prices[plan] ?? 0;
 
   router.push({
     path: '/purchase',
     query: {
-      plan,
-      price: String(price),
+      // lock to the single option
+      plan: PLAN,
+      price: PRICE_DISPLAY,
+
+      // pass-through production metadata
       productionname: prod.productionName,
       productionslug: prod.productionSlug,
       productionaddress: prod.productionAddress,
@@ -155,6 +176,24 @@ function go(plan) {
   });
 }
 </script>
+
+<style scoped>
+.pricing__grid.single {
+  display: flex;
+  justify-content: center;
+}
+.price--focus {
+  border-color: gold;
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+}
+.btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+</style>
+
+
+
 <style scoped>
 /* ---------------- Monochrome palette ---------------- */
 :global(:root) {

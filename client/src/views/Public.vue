@@ -2,15 +2,6 @@
 <template>
   <PublicNav />
 
-  <!-- Alpha banner -->
-  <section class="banner" v-reveal>
-    <div class="container">
-      <p class="banner__text">
-        ALPHA VERSION 1.0: Please break the site as much as you want. Do NOT use this for a real production, we have to clear the Database out all the time, so you will lose your work.
-      </p>
-    </div>
-  </section>
-
   <!-- Hero -->
   <section class="hero container">
     <div class="hero__inner">

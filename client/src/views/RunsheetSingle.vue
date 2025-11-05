@@ -12,18 +12,25 @@
         <!-- Header -->
         <div class="row header">
           <div class="h-left">
-            <div class="label">PURCHASE / RENTAL:</div>
+            <!-- 🔹 PURCHASE / RENTAL driven by rs.purchaseType -->
+            <div class="label">
+              {{ purchaseRentalLabel || 'PURCHASE / RENTAL' }}:
+            </div>
           </div>
           <div class="h-center">
             <div class="title">SET DECORATION</div>
             <div class="subtitle">TRANSPORT / RENTAL</div>
           </div>
           <div class="h-right">
+            <!-- 🔹 Set name -->
             <div class="line-pair">
-              <span>Set:&nbsp;</span><span class="line">{{ setLabel || ' ' }}</span>
+              <span>Set:&nbsp;</span>
+              <span class="line">{{ setName || ' ' }}</span>
             </div>
+            <!-- 🔹 Set number (not runsheet id) -->
             <div class="line-pair">
-              <span>#&nbsp;</span><span class="line line--short">{{ shortId }}</span>
+              <span>Set #&nbsp;</span>
+              <span class="line line--short">{{ setNumber || ' ' }}</span>
             </div>
           </div>
         </div>
@@ -305,15 +312,12 @@ const me = ref(null);
 const rs = ref(null);
 const sheetEl = ref(null);
 
-/* ---------- NEW: handwriting presence + routes ---------- */
+/* ---------- handwriting presence + routes ---------- */
 const hasSavedHand = computed(() => {
   const r = rs.value || {};
-  // consider common fields you may be using to store canvas data
-  const byHand = r.byHand || r.handwritten || r.canvas || null;
-  const hasJson    = byHand && (byHand.json || byHand.fabric || byHand.data);
-  const hasStrokes = byHand && Array.isArray(byHand.strokes) && byHand.strokes.length;
-  const hasSvg     = byHand && byHand.svg;
-  return !!(hasJson || hasStrokes || hasSvg);
+  const hand = r.hand || null;                      // ← uses new schema field
+  const hasStrokes = hand && Array.isArray(hand.strokes) && hand.strokes.length;
+  return !!hasStrokes;
 });
 const hasOcrImage = computed(() => !!(rs.value?.ocr?.latest?.image));
 const isHandwritten = computed(() => hasSavedHand.value || hasOcrImage.value);
@@ -325,7 +329,7 @@ const typedEditRoute = computed(() => ({
 const handEditRoute = computed(() => ({
   name: 'runsheet-by-hand',
   params: { slug: slug.value, id: route.params.id },
-  query:  { restore: '1' }, // hint canvas to restore saved data
+  query:  { restore: '1' },
 }));
 const handViewRoute = computed(() => ({
   name: 'runsheet-handwritten',
@@ -352,12 +356,26 @@ const companyAddrLines = computed(() =>
 );
 
 /* ---------------- header helpers ---------------- */
-const shortId = computed(() => (rs.value?._id ? rs.value._id.slice(-6) : ' '));
-const setLabel = computed(() => {
+
+// 🔹 PURCHASE vs RENTAL label using schema's purchaseType
+const purchaseRentalLabel = computed(() => {
+  const pt = rs.value?.purchaseType;
+  if (!pt) return '';
+  return String(pt).toUpperCase(); // "PURCHASE" or "RENTAL"
+});
+
+// 🔹 Set name & set number from populated Set
+const setName = computed(() => {
   const v = rs.value?.set;
   if (!v) return '';
-  if (typeof v === 'string') return `#${v}`;
-  return `${v.number || ''} ${v.name || ''}`.trim();
+  if (typeof v === 'string') return v;  // fallback if not populated
+  return v.name || '';
+});
+
+const setNumber = computed(() => {
+  const v = rs.value?.set;
+  if (!v || typeof v === 'string') return '';
+  return v.number || '';
 });
 
 /* ---------------- supplier (prefer rs.supplier; fallback to takeTo) ---------------- */
@@ -534,7 +552,6 @@ onMounted(async () => {
 
   await loadProduction();
 
-  // Runsheet remains tenant-scoped
   const data = await api.get(`/tenant/runsheets/${route.params.id}`);
   rs.value = data;
 
@@ -630,6 +647,8 @@ async function doPrintImage() {
   }
 }
 </script>
+
+
 
 
 

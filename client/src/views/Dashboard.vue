@@ -154,7 +154,7 @@ const imageUrl = (p) => {
   // If already absolute (http/https/data), return as-is
   if (/^(https?:)?\/\//i.test(p) || /^data:/i.test(p)) return p;
   // If relative like "/uploads/...", prefix server origin (remove "/api")
-  if (p.startsWith('/')) return apiBase.replace('/api','') + p;
+  if (p.startsWith('/')) return apiBase.replace('','') + p;
   // Otherwise, assume it's already resolvable
   return p;
 };

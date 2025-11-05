@@ -259,6 +259,7 @@ onMounted(async () => {
   } catch {
     me.value = null;
   }
+  
   await load();
   await nextTick();
   updateMarkers();

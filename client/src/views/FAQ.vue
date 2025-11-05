@@ -9,12 +9,6 @@
     </header>
 
     <div class="faq__list">
-      <details open>
-        <summary>Is this production-ready?</summary>
-        <div>
-          ALPHA VERSION 1.0: Please break the site as much as you want. Do NOT use this for a real production. We clear the database frequently, so you will lose your work.
-        </div>
-      </details>
 
       <details>
         <summary>What is Set Dec Runner?</summary>

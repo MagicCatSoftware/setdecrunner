@@ -10,9 +10,6 @@ import { authRequired, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// All routes require auth (and tenant context via header for CRUD)
-router.use(authRequired);
-
 /* -------------------------- helpers -------------------------- */
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -99,6 +96,7 @@ async function resolveProductionId(req) {
 
 /* ------------------------ list/create ------------------------ */
 
+// GET /tenant/suppliers
 router.get('/', async (req, res, next) => {
   try {
     const productionId = requireProductionId(req);
@@ -117,10 +115,62 @@ router.get('/', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// POST /tenant/suppliers  (create a single supplier)
+router.post('/', async (req, res, next) => {
+  try {
+    const productionId = requireProductionId(req);
+    const createdBy = req.user?._id;
+
+    if (!createdBy) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { name, address, phone, contactName, hours, location } = req.body || {};
+
+    if (!name || !address) {
+      return res.status(400).json({ error: 'name and address required' });
+    }
+
+    const doc = {
+      name: String(name || '').trim(),
+      address: String(address || '').trim(),
+      productionId,
+      createdBy,
+    };
+
+    if (phone !== undefined)       doc.phone       = String(phone || '').trim() || undefined;
+    if (contactName !== undefined) doc.contactName = String(contactName || '').trim() || undefined;
+    if (hours !== undefined)       doc.hours       = String(hours || '').trim() || undefined;
+
+    if (location !== undefined) {
+      const loc = coerceLocation(location);
+      if (loc) doc.location = loc;
+    }
+
+    const s = await Supplier.create(doc);
+    res.json(s);
+  } catch (e) { next(e); }
+});
+
+/* ----------------------- excel/csv import --------------------- */
+/**
+ * POST /tenant/suppliers/import
+ * Accepts .xlsx/.xls/.csv in field "file".
+ * Upserts by (productionId, name, address).
+ * Optional columns: phone, contact/contactName, hours, lat, lng.
+ *
+ * Production resolution:
+ *  - X-Production-Id header (preferred)
+ *  - or ?slug=my-production
+ */
 router.post('/import', upload.single('file'), async (req, res, next) => {
   try {
     const productionId = await resolveProductionId(req);
     const createdBy = req.user?._id;
+
+    if (!createdBy) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
 
     if (!req.file?.buffer) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -240,8 +290,8 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
         skipped: skipped.length,
         analyzed,
         items: 0,
-        skippedExamples: skipped.slice(0, 5), // help debug header mapping
-        headerMap,                             // see what we matched
+        skippedExamples: skipped.slice(0, 5),
+        headerMap,
       });
     }
 
@@ -264,6 +314,7 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
 
 /* -------------------- read/update/delete --------------------- */
 
+// GET /tenant/suppliers/:id
 router.get('/:id', async (req, res, next) => {
   try {
     const productionId = requireProductionId(req);
@@ -278,6 +329,7 @@ router.get('/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// PATCH /tenant/suppliers/:id
 router.patch('/:id', async (req, res, next) => {
   try {
     const productionId = requireProductionId(req);
@@ -318,6 +370,7 @@ router.patch('/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// DELETE /tenant/suppliers/:id
 router.delete('/:id', requireRole('admin'), async (req, res, next) => {
   try {
     const productionId = requireProductionId(req);
@@ -328,119 +381,6 @@ router.delete('/:id', requireRole('admin'), async (req, res, next) => {
     });
     if (!s) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
-  } catch (e) { next(e); }
-});
-
-/* ----------------------- excel/csv import --------------------- */
-/**
- * POST /tenant/suppliers/import
- * Accepts .xlsx/.xls/.csv in field "file".
- * Upserts by (productionId, name, address).
- * Optional columns: phone, contact/contactName, hours, lat, lng.
- *
- * Production resolution:
- *  - X-Production-Id header (preferred)
- *  - or ?slug=my-production
- */
-router.post('/import', upload.single('file'), async (req, res, next) => {
-  try {
-    const productionId = await resolveProductionId(req);
-    const createdBy = req.user?._id;
-
-    if (!req.file?.buffer) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = wb.SheetNames[0];
-    if (!sheetName) return res.status(400).json({ error: 'No sheets found in file' });
-    const ws = wb.Sheets[sheetName];
-
-    // rows as array of objects keyed by header row
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-    if (!rows.length) return res.status(400).json({ error: 'Sheet is empty' });
-
-    // header aliases (case-insensitive)
-    const ALIASES = {
-      name: ['name', 'supplier', 'supplier name'],
-      address: ['address', 'addr', 'street', 'location'],
-      phone: ['phone', 'tel', 'telephone', 'mobile', 'phone number'],
-      contactName: ['contact', 'contact name', 'attn', 'attention'],
-      hours: ['hours', 'opening hours', 'open hours', 'business hours'],
-      lat: ['lat', 'latitude'],
-      lng: ['lng', 'lon', 'long', 'longitude'],
-    };
-
-    const headerMap = {};
-    const firstRowKeys = Object.keys(rows[0] || {});
-    for (const key of firstRowKeys) {
-      const k = String(key || '').trim().toLowerCase();
-      for (const [canon, list] of Object.entries(ALIASES)) {
-        if (list.includes(k)) {
-          headerMap[key] = canon;
-          break;
-        }
-      }
-    }
-
-    const ops = [];
-    let skipped = 0;
-
-    const toNum = (v) => {
-      if (v === '' || v === null || v === undefined) return undefined;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : undefined;
-    };
-
-    for (const row of rows) {
-      const doc = { name: '', address: '', phone: '', contactName: '', hours: '' };
-      let lat, lng;
-
-      for (const [rawKey, value] of Object.entries(row)) {
-        const canon = headerMap[rawKey];
-        if (!canon) continue;
-        if (canon === 'lat') { lat = toNum(value); continue; }
-        if (canon === 'lng') { lng = toNum(value); continue; }
-        doc[canon] = String(value || '').trim();
-      }
-
-      if (!doc.name || !doc.address) { skipped++; continue; }
-
-      const $set = {
-        address: doc.address,
-        phone: doc.phone || undefined,
-        contactName: doc.contactName || undefined,
-        hours: doc.hours || undefined,
-      };
-
-      if (lat !== undefined || lng !== undefined) {
-        $set.location = {
-          lat: lat === undefined ? null : lat,
-          lng: lng === undefined ? null : lng,
-        };
-      }
-
-      ops.push({
-        updateOne: {
-          filter: { productionId, name: doc.name, address: doc.address },
-          update: {
-            $set,
-            $setOnInsert: { name: doc.name, createdBy, productionId },
-          },
-          upsert: true,
-        }
-      });
-    }
-
-    if (!ops.length) {
-      return res.json({ ok: true, inserted: 0, updated: 0, skipped, items: 0 });
-    }
-
-    const result = await Supplier.bulkWrite(ops, { ordered: false });
-    const inserted = result.upsertedCount || 0;
-    const updated = result.modifiedCount || 0;
-
-    return res.json({ ok: true, inserted, updated, skipped, items: ops.length });
   } catch (e) { next(e); }
 });
 

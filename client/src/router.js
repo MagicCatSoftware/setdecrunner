@@ -1,4 +1,3 @@
-// client/src/router.js
 import { createRouter, createWebHistory } from 'vue-router';
 import api, { apiGet } from './api.js';
 import { logout as softLogout } from './auth.js';
@@ -78,6 +77,7 @@ function hardLogout() {
     localStorage.removeItem('currentProductionId');
     localStorage.removeItem('tenantAccessCache');
   } catch {}
+  try { api.setToken?.(''); } catch {}
   try { api.setProductionId?.(''); } catch {}
   try { api.setUnauthorizedHandler?.(null); } catch {}
   try { window.dispatchEvent(new Event('storage')); } catch {}
@@ -108,6 +108,7 @@ function enterTenantMode(router, slug, fullPath) {
 /* OAuth helper */
 function setTokenAndNotify(token) {
   try { localStorage.setItem('token', token); } catch {}
+  try { api.setToken?.(token); } catch {}
   try { window.dispatchEvent(new Event('storage')); } catch {}
   try { window.dispatchEvent(new Event('focus')); } catch {}
 }
@@ -128,13 +129,6 @@ function setAccessForPid(pid, info) {
 function getAccessForPid(pid) {
   const cache = readAccessCache();
   return cache[String(pid)] || null;
-}
-function hasTenantAccess(pid, { requireAuthorized = false, requireAdmin = false } = {}) {
-  const a = getAccessForPid(pid);
-  if (!a || !a.isMember) return false;
-  if (requireAuthorized && !a.authorized) return false;
-  if (requireAdmin && !(a.owner || (String(a.role || '').toLowerCase() === 'admin'))) return false;
-  return true;
 }
 
 /* ---------------- pid + tenant session hydration ---------------- */
@@ -159,17 +153,23 @@ async function ensurePidAndAccessForSlug(slug) {
     try { localStorage.setItem('currentProductionId', pid); } catch {}
     try { api.setProductionId?.(pid); } catch {}
 
-    // 3) If authed, hydrate tenant session once and cache access (member/authorized/admin/owner)
+    // 3) If authed, hydrate tenant session once and cache access
     if (isAuthed()) {
       try {
         const me = await apiGet('/tenant/tenantauth/me', undefined, { headers: { 'X-Production-Id': pid } });
+
+        const rawRole = String(me?.role || me?.member?.role || 'user').trim().toLowerCase();
+        const isAdmin = rawRole === 'admin';
+
         const access = {
-          isMember: true,
+          isMember: !!(me?.owner || me?.member),
           owner: !!me?.owner,
-          role: me?.role || (me?.member?.role) || 'user',
-          siteAuthorized: !!(me?.member?.siteAuthorized) || !!me?.owner,
-          authorized: !!(me?.owner || me?.member?.siteAuthorized),
+          role: rawRole,
+          // admin treated as authorized/siteAuthorized
+          siteAuthorized: !!(me?.member?.siteAuthorized) || !!me?.owner || isAdmin,
+          authorized: !!(me?.owner || me?.member?.siteAuthorized || isAdmin),
         };
+
         setAccessForPid(pid, access);
 
         // Optional legacy user cache update
@@ -201,7 +201,7 @@ const router = createRouter({
     { path: '/features', name: 'features', component: Features },
     { path: '/FAQ', name: 'FAQ', component: FAQ },
 
-    // Global set-password (no slug) — works for emails that don't include slug in path
+    // Global set-password (no slug)
     { path: '/set-password', name: 'set-password', component: SetPassword },
 
     // Owner area
@@ -239,7 +239,6 @@ const router = createRouter({
       children: [
         { path: 'login', name: 'tenant-login', component: TenantLogin, meta: { guestOnlyTenant: true } },
 
-        // Tenant-scoped set password page — allow guests and signed-in users
         {
           path: 'set-password',
           name: 'tenant-set-password',
@@ -284,6 +283,7 @@ const router = createRouter({
           async beforeEnter(to) {
             try {
               const rs = await apiGet(`/tenant/runsheets/${to.params.id}`);
+             
               const hand = !!(rs?.ocr?.latest?.image) || /\(by hand\)/i.test(rs?.title || '');
               if (hand) return { name: 'runsheet-handwritten', params: { slug: to.params.slug, id: to.params.id }, replace: true };
               return { name: 'runsheet-view-official', params: { slug: to.params.slug, id: to.params.id }, replace: true };
@@ -320,8 +320,9 @@ const router = createRouter({
         { path: 'items',         name: 'items',         component: Items,          meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
         { path: 'places',        name: 'places',        component: Places,         meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
 
-        // Admin management (tenant)
-        { path: 'adminusers',    name: 'admin-users',   component: AdminUsers,     meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true, requiresAdmin: true } },
+        // Admin page still exists, but router no longer has a special admin-only redirect;
+        // server should enforce admin-only behavior.
+        { path: 'adminusers',    name: 'admin-users',   component: AdminUsers,     meta: { requiresAuth: true, requiresMembership: true, requiresAuthorized: true } },
       ],
     },
 
@@ -334,7 +335,6 @@ router.beforeEach(async (to) => {
   const q = to.query || {};
   const tokenQ = typeof q.token === 'string' ? q.token : '';
 
-  // ⛔ Only treat ?token= as an OAuth handoff IF we are NOT on set-password routes.
   const isSetPasswordRoute =
     to.name === 'set-password' || to.name === 'tenant-set-password';
 
@@ -366,7 +366,7 @@ router.beforeEach(async (to) => {
   const slug = String(to.params.slug);
   enterTenantMode(router, slug, to.fullPath);
 
-  // Resolve pid (and hydrate access cache once)
+  // Resolve pid
   let pid = localStorage.getItem('currentProductionId') || '';
   if (!pid) {
     try { pid = await ensurePidAndAccessForSlug(slug); }
@@ -375,8 +375,9 @@ router.beforeEach(async (to) => {
 
   // guest pages
   if (to.meta?.guestOnlyTenant) {
-    if (to.meta?.allowAuthed) return true; // let authed users view (e.g., set-password)
-    if (isAuthed() && hasTenantAccess(pid)) {
+    if (to.meta?.allowAuthed) return true;
+    const access = getAccessForPid(pid);
+    if (isAuthed() && access && access.isMember) {
       return { name: 'tenant-home', params: { slug }, replace: true };
     }
     return true;
@@ -387,36 +388,68 @@ router.beforeEach(async (to) => {
     return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath }, replace: true };
   }
 
-  // membership/authorization/admin gates
-  if (to.meta?.requiresMembership && !hasTenantAccess(pid)) {
+  // ---- membership / authorization gates (no admin gate here) ----
+  let access = getAccessForPid(pid);
+
+  async function ensureAccess() {
+    if (access && access.isMember && typeof access.authorized === 'boolean') {
+      return access;
+    }
+
     try {
-      const me = await apiGet('/tenant/tenantauth/me', undefined, { headers: { 'X-Production-Id': pid } });
-      const access = {
-        isMember: true,
+      const me = await apiGet('/tenant/tenantauth/me', undefined, {
+        headers: { 'X-Production-Id': pid },
+      });
+
+      const rawRole = String(me?.role || me?.member?.role || 'user').trim().toLowerCase();
+      const isAdmin = rawRole === 'admin';
+
+      access = {
+        isMember: !!(me?.owner || me?.member),
         owner: !!me?.owner,
-        role: me?.role || (me?.member?.role) || 'user',
-        siteAuthorized: !!(me?.member?.siteAuthorized) || !!me?.owner,
-        authorized: !!(me?.owner || me?.member?.siteAuthorized),
+        role: rawRole,
+        siteAuthorized: !!(me?.member?.siteAuthorized) || !!me?.owner || isAdmin,
+        authorized: !!(me?.owner || me?.member?.siteAuthorized || isAdmin),
       };
+
       setAccessForPid(pid, access);
-    } catch {}
-    if (!hasTenantAccess(pid)) {
-      return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath, err: 'not-authorized' }, replace: true };
+      console.log('[router] tenant access for pid', pid, access);
+    } catch (err) {
+      console.warn('[router] failed to hydrate tenant access', err);
+    }
+
+    return access;
+  }
+
+  if (to.meta?.requiresMembership) {
+    access = await ensureAccess();
+    if (!access || !access.isMember) {
+      return {
+        name: 'tenant-login',
+        params: { slug },
+        query: { r: to.fullPath, err: 'not-member' },
+        replace: true,
+      };
     }
   }
 
-  if (to.meta?.requiresAuthorized && !hasTenantAccess(pid, { requireAuthorized: true })) {
-    return { name: 'tenant-login', params: { slug }, query: { r: to.fullPath, err: 'not-authorized' }, replace: true };
-  }
-
-  if (to.meta?.requiresAdmin && !hasTenantAccess(pid, { requireAuthorized: true, requireAdmin: true })) {
-    return { name: 'tenant-home', params: { slug }, query: { err: 'admin-only' }, replace: true };
+  if (to.meta?.requiresAuthorized) {
+    access = await ensureAccess();
+    if (!access || !access.authorized) {
+      return {
+        name: 'tenant-login',
+        params: { slug },
+        query: { r: to.fullPath, err: 'not-authorized' },
+        replace: true,
+      };
+    }
   }
 
   return true;
 });
 
 export default router;
+
 
 
 
