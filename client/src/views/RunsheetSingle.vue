@@ -503,7 +503,7 @@ async function shareLink(){
 async function loadProduction() {
   if (!slug.value) { production.value = null; return; }
   try {
-    const p = await api.get(`/tenant/productions/by-slug/${encodeURIComponent(slug.value)}`);
+    const p = await api.get(`/tenant/getproductions/by_slug/${encodeURIComponent(slug.value)}`);
     production.value = await api.get(`/tenant/productions/${p._id}`);
   } catch {
     production.value = null;

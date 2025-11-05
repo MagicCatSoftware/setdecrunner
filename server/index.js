@@ -504,7 +504,7 @@ app.get('/debug/smtp', async (_req, res) => {
 });
 
 // Public: resolve by slug
-app.get('/tenant/productions/by-slug/:slug', async (req, res) => {
+app.get('/productions/by-slug/:slug', async (req, res) => {
   const slug = normalizeSlug(req.params.slug || '');
   const prod = await Production.findOne({ slug, isActive: true }).select('_id title slug').lean();
   if (!prod) return res.status(404).json({ error: 'Production not found' });
