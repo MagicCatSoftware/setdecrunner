@@ -777,7 +777,7 @@ app.use('/tenant/admin',bearerAuth, tenantGate({ authorized: true, admin: true }
 app.use('/tenant/sets',bearerAuth, tenantGate({ authorized: true, admin: false }), setRoutes);
 
 // Misc tenant endpoints
-app.use('/tenant', tenantGate({ authorized: true, admin: true }), tenantRouter);
+app.use('/tenant',bearerAuth, tenantGate({ authorized: true, admin: false }), tenantRouter);
 
 /* --------------------------------- Boot --------------------------------- */
 const PORT = process.env.PORT || 4001;

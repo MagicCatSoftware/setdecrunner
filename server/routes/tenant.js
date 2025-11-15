@@ -1,3 +1,4 @@
+// server/routes/tenantRoutes.js
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
@@ -9,36 +10,45 @@ const router = Router();
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(String(v || ''));
 
+const HEX24 = /^[a-f0-9]{24}$/i;
+
 /**
  * Normalize many possible ID shapes into a string:
  * - string/number
  * - raw ObjectId
- * - documents or payloads with _id / id / uid / userId
+ * - documents or payloads with _id / id / user
+ *
+ * IMPORTANT: for member docs, prefer .user over subdoc _id.
  */
-// utils/id.js (or near your router code)
-
-const HEX24 = /^[a-f0-9]{24}$/i;
-
 export function toId(v) {
   if (!v) return '';
-  if (typeof v === 'string') return HEX24.test(v) ? v : '';
+
+  if (typeof v === 'string') {
+    return HEX24.test(v) ? v : '';
+  }
+
   if (Array.isArray(v)) return toId(v[0]);
 
   // Raw ObjectId
   if (v instanceof mongoose.Types.ObjectId) return v.toString();
 
-  // Populated/doc shapes
+  // For member subdocs, prefer the backing user
+  if (v.user) return toId(v.user);
+
+  // Normal docs
   if (v._id) return toId(v._id);
   if (v.id)  return toId(v.id);
-  if (v.user) return toId(v.user);
 
   // Last resort
   try {
     const s = v.toString?.();
     return HEX24.test(s) ? s : '';
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 }
-export const idsEqual = (a,b) => {
+
+export const idsEqual = (a, b) => {
   const A = toId(a), B = toId(b);
   return A && B && A === B;
 };
@@ -80,7 +90,7 @@ export async function requireOwner(req, res, next) {
     const userId = toId(req.user);
     const productionId = getProductionId(req);
 
-    const prod = await Production.findById(req.headers['x-production-id'])
+    const prod = await Production.findById(productionId)
       .select('_id ownerUserId owner members')
       .lean();
 
@@ -98,15 +108,23 @@ export async function requireOwner(req, res, next) {
       const upserts = [];
 
       const isMember =
-        Array.isArray(prod.members) && prod.members.some((m) => idsEqual(m, userId));
+        Array.isArray(prod.members) &&
+        prod.members.some((m) => idsEqual(m.user, userId));
 
       if (!isMember) {
         upserts.push(
-          Production.updateOne({ _id: prod._id }, { $addToSet: { members: userId } })
+          Production.updateOne(
+            { _id: prod._id },
+            { $addToSet: { 'members': { user: userId } } }
+          )
         );
       }
+
       upserts.push(
-        User.updateOne({ _id: userId }, { $addToSet: { productionIds: prod._id } })
+        User.updateOne(
+          { _id: userId },
+          { $addToSet: { productionIds: prod._id } }
+        )
       );
 
       if (upserts.length) await Promise.all(upserts);
@@ -115,7 +133,8 @@ export async function requireOwner(req, res, next) {
 
     // No owner yet — only a current member may claim ownership.
     let isMember =
-      Array.isArray(prod.members) && prod.members.some((m) => idsEqual(m, userId));
+      Array.isArray(prod.members) &&
+      prod.members.some((m) => idsEqual(m.user, userId));
 
     if (!isMember) {
       // OR: user.productionIds contains this production
@@ -131,16 +150,22 @@ export async function requireOwner(req, res, next) {
     const claimed = await Production.findOneAndUpdate(
       {
         _id: prod._id,
-        $or: [{ ownerUserId: { $exists: false } }, { ownerUserId: null }],
-        // If your data sometimes uses `owner` only, also allow claiming when `owner` is null
+        $or: [
+          { ownerUserId: { $exists: false } },
+          { ownerUserId: null }
+        ],
       },
-      { $set: { ownerUserId: userId, owner: userId }, $addToSet: { members: userId } },
+      {
+        $set: { ownerUserId: userId, owner: userId },
+        $addToSet: { members: { user: userId } }
+      },
       { new: true }
     ).lean();
 
     if (!claimed) {
-      // Someone else may have claimed; re-read to confirm
-      const latest = await Production.findById(prod._id).select('_id ownerUserId owner').lean();
+      const latest = await Production.findById(prod._id)
+        .select('_id ownerUserId owner')
+        .lean();
       const nowOwner = latest?.ownerUserId || latest?.owner;
       if (!nowOwner || !idsEqual(nowOwner, userId)) {
         return res.status(403).json({ error: 'Owner permissions required' });
@@ -148,7 +173,10 @@ export async function requireOwner(req, res, next) {
     }
 
     // Keep user's side in sync
-    await User.updateOne({ _id: userId }, { $addToSet: { productionIds: prod._id } });
+    await User.updateOne(
+      { _id: userId },
+      { $addToSet: { productionIds: prod._id } }
+    );
 
     return next();
   } catch (e) {
@@ -161,66 +189,102 @@ export async function requireOwner(req, res, next) {
 /**
  * GET /members
  * Returns members for this production.
- * UNION of:
- *   - Production.members
- *   - Users with productionIds containing this production
- * Owner (from ownerUserId OR owner) sorted first.
+ * Source of truth: Production.members[]
+ * (we no longer pull in all global users; only members of this production)
  */
-router.get('/members', async (req, res) => {
+// tenantRoutes.js
 
+router.get('/members', async (req, res) => {
   try {
+    // Same guard as before: must have user + x-production-id
     if (!requireContext(req, res)) return;
 
+    // Get production id from header
     const productionId = getProductionId(req);
-    
+    if (!productionId) {
+      return res.status(400).json({ error: 'Missing production id' });
+    }
+
+    // Optional search query (?q=foo)
+    const { q } = req.query || {};
+    const needle = q && String(q).trim().toLowerCase();
+
+    // Load production with members only (no extra populate)
     const prod = await Production.findById(productionId)
       .select('members ownerUserId owner')
       .lean();
-    if (!prod) return res.status(404).json({ error: 'Production not found' });
-    
-    const ownerId = prod.ownerUserId || prod.owner || null;
-   
-    const fromProd = (prod.members || []).map((m) => toId(m)).filter(Boolean);
-    
-    const viaUsers = await User.find({ productionIds: req.headers['x-production-id'] }).select('_id').lean();
-    const set = new Set(fromProd);
-    for (const u of viaUsers) set.add(toId(u._id));
-    const ids = [...set].filter(Boolean);
 
-    if (!ids.length) return res.json({ items: [] });
+    if (!prod) {
+      return res.status(404).json({ error: 'Production not found' });
+    }
 
-    const users = await User.find({ _id: { $in: ids } })
-      .select('_id email name role photo')
-      .lean();
+    // ----- Owner (from User collection) -----
+    let owner = null;
+    const ownerId = toId(prod.ownerUserId || prod.owner);
 
-    users.sort((a, b) => {
-      if (ownerId && idsEqual(a._id, ownerId)) return -1;
-      if (ownerId && idsEqual(b._id, ownerId)) return 1;
-      const an = (a.name || a.email || '').toLowerCase();
-      const bn = (b.name || b.email || '').toLowerCase();
-      return an.localeCompare(bn);
-    });
+    if (ownerId) {
+      const u = await User.findById(ownerId)
+        .select('_id email name')
+        .lean();
+      if (u) {
+        owner = {
+          id: String(u._id),
+          email: u.email,
+          name: u.name || '',
+        };
+      }
+    }
 
-   
+    // ----- Members from Production.members -----
+    // NOTE: this mirrors your working route:
+    //   _id      -> member subdocument id
+    //   user     -> backing User ObjectId (may be null)
+    //   email    -> member email
+    //   role     -> member role
+    //   siteAuthorized, addedAt
 
-    return res.json({ items: users });
+    let members = (prod.members || []).map((m) => ({
+      _id: m._id || m.id || null,
+      user: m.user || null,
+      email: m.email || '',
+      role: m.role || 'user',
+      siteAuthorized: !!m.siteAuthorized,
+      addedAt: m.addedAt || null,
+    }));
+
+    // Optional filter by email substring
+    if (needle) {
+      members = members.filter((m) =>
+        (m.email || '').toLowerCase().includes(needle)
+      );
+    }
+
+    // Sort alphabetically by email
+    members.sort((a, b) =>
+      (a.email || '').localeCompare(b.email || '')
+    );
+
+    return res.json({ owner, members });
   } catch (e) {
-    console.error('GET /members error:', e);
-    return res.status(500).json({ error: 'Server error' });
+    const code = e.status || 500;
+    if (code >= 500) {
+      console.error('[GET /tenant/tenantauth/members]', e);
+    }
+    res.status(code).json({ error: e.message || 'Failed to list members' });
   }
 });
+
 
 /**
  * POST /members
  * Body: { email }
  * Owner-only. Upserts user and links both sides.
  */
-// inside POST /members
 router.post('/members', requireOwner, async (req, res) => {
   try {
     if (!requireContext(req, res)) return;
 
-    const productionId = getProductionId(req);               // <-- ObjectId string from header
+    const productionId = getProductionId(req);
     const email = String(req.body?.email || '').toLowerCase().trim();
     if (!email) return res.status(400).json({ error: 'Email required' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -234,29 +298,32 @@ router.post('/members', requireOwner, async (req, res) => {
       { upsert: true, new: true }
     ).lean();
 
-    // Ensure membership on the Production side (handles both schemas)
-    const prod = await Production.findById(req.headers['x-production-id']).select('_id members').lean();
+    // Ensure membership on the Production side
+    const prod = await Production.findById(productionId)
+      .select('_id members')
+      .lean();
     if (!prod) return res.status(404).json({ error: 'Production not found' });
 
     const userIdStr = String(user._id);
-    const hasMember = (prod.members || []).some(m =>
-      String(m) === userIdStr || String(m?.user) === userIdStr
+    const hasMember = (prod.members || []).some((m) =>
+      String(m?.user || m) === userIdStr
     );
 
     if (!hasMember) {
-      if (Array.isArray(prod.members) && prod.members.length && typeof prod.members[0] === 'object' && prod.members[0] !== null && 'user' in prod.members[0]) {
-        // members: [{ user: ObjectId, role?: string }]
-        await Production.updateOne(
-          { _id: productionId, 'members.user': { $ne: user._id } },
-          { $push: { members: { user: user._id } } }          // push object form
-        );
-      } else {
-        // members: [ObjectId]
-        await Production.updateOne(
-          { _id: productionId },                               // <-- FIXED: match by _id
-          { $addToSet: { members: user._id } }                 // dedupe by ObjectId
-        );
-      }
+      // members: [{ user: ObjectId, ... }]
+      await Production.updateOne(
+        { _id: productionId, 'members.user': { $ne: user._id } },
+        {
+          $push: {
+            members: {
+              user: user._id,
+              email,
+              role: 'editor',
+              siteAuthorized: true,
+            },
+          },
+        }
+      );
     }
 
     // Ensure membership on the User side
@@ -265,7 +332,10 @@ router.post('/members', requireOwner, async (req, res) => {
       { $addToSet: { productionIds: productionId } }
     );
 
-    return res.json({ ok: true, user: { id: user._id, email: user.email } });
+    return res.json({
+      ok: true,
+      user: { id: user._id, email: user.email },
+    });
   } catch (e) {
     if (e?.code === 11000) {
       return res.status(409).json({ error: 'Email already in use' });
@@ -279,10 +349,11 @@ router.post('/members', requireOwner, async (req, res) => {
  * DELETE /members/:userId
  * Owner-only. Removes membership on both sides. Owner cannot remove self.
  */
-// helper: safe cast to ObjectId or return null
 const toOid = (v) => {
   const s = String(v || '').trim();
-  return mongoose.Types.ObjectId.isValid(s) ? new mongoose.Types.ObjectId(s) : null;
+  return mongoose.Types.ObjectId.isValid(s)
+    ? new mongoose.Types.ObjectId(s)
+    : null;
 };
 
 router.delete('/members/:userId', requireOwner, async (req, res) => {
@@ -298,34 +369,43 @@ router.delete('/members/:userId', requireOwner, async (req, res) => {
     if (!userOid) return res.status(400).json({ error: 'Invalid userId' });
 
     // Owner guard
-    const prod = await Production.findById(prodOid).select('ownerUserId owner').lean();
+    const prod = await Production.findById(prodOid)
+      .select('ownerUserId owner')
+      .lean();
     if (!prod) return res.status(404).json({ error: 'Production not found' });
 
-    const ownerId = (prod.ownerUserId ?? prod.owner) ? String(prod.ownerUserId ?? prod.owner) : null;
+    const ownerId =
+      prod.ownerUserId ?? prod.owner
+        ? String(prod.ownerUserId ?? prod.owner)
+        : null;
     if (ownerId && String(userOid) === ownerId) {
       return res.status(400).json({ error: 'Owner cannot be removed' });
     }
 
-    // Perform pulls for both shapes (and string variants, just in case)
     const userIdStr = String(userOid);
 
-    const [pullDirectOid, pullObjectOid, pullDirectStr, pullObjectStr, pullUserSide] = await Promise.all([
-      // members: [ObjectId]
-      Production.updateOne({ _id: prodOid }, { $pull: { members: userOid } }),
+    const [
+      pullObjectOid,
+      pullObjectStr,
+      pullUserSide,
+    ] = await Promise.all([
       // members: [{ user: ObjectId, ... }]
-      Production.updateOne({ _id: prodOid }, { $pull: { members: { user: userOid } } }),
-      // if stored as strings by accident
-      Production.updateOne({ _id: prodOid }, { $pull: { members: userIdStr } }),
-      Production.updateOne({ _id: prodOid }, { $pull: { members: { user: userIdStr } } }),
-      // user.productionIds: [ObjectId]
-      User.updateOne({ _id: userOid }, { $pull: { productionIds: prodOid } }),
+      Production.updateOne(
+        { _id: prodOid },
+        { $pull: { members: { user: userOid } } }
+      ),
+      Production.updateOne(
+        { _id: prodOid },
+        { $pull: { members: { user: userIdStr } } }
+      ),
+      User.updateOne(
+        { _id: userOid },
+        { $pull: { productionIds: prodOid } }
+      ),
     ]);
 
-    // Optional: report whether anything changed
     const modified =
-      (pullDirectOid.modifiedCount ?? pullDirectOid.nModified ?? 0) +
       (pullObjectOid.modifiedCount ?? pullObjectOid.nModified ?? 0) +
-      (pullDirectStr.modifiedCount ?? pullDirectStr.nModified ?? 0) +
       (pullObjectStr.modifiedCount ?? pullObjectStr.nModified ?? 0);
 
     return res.json({ ok: true, removedFromProduction: modified > 0 });
@@ -334,5 +414,7 @@ router.delete('/members/:userId', requireOwner, async (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
 export default router;
+
 

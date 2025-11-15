@@ -337,7 +337,9 @@ async function ensureProductionId() {
       localStorage.setItem('currentProductionId', productionId.value);
       api.setProductionId(productionId.value);
     }
-  } catch {}
+  } catch {
+    // ignore
+  }
   return productionId.value;
 }
 
@@ -345,31 +347,38 @@ async function ensureProductionId() {
 const isAdmin = computed(() => me.value?.role === 'admin' || me.value?.isAdmin === true);
 const stamp = () => { lastUpdated.value = new Date().toLocaleTimeString(); };
 
-const paramsForLoad = () => {
-  const params = {};
-  if (mine.value) params.mine = 1;
-  if (assignedToMe.value) params.assignedToMe = 1;
-  if (open.value) params.open = 1;
-  if (statusFilter.value) params.status = statusFilter.value;
-  if (typeFilter.value) params.purchaseType = typeFilter.value;
-  if (q.value.trim()) params.q = q.value.trim();
-  if (productionId.value) params.productionId = productionId.value;
-  return params;
-};
-
-const qs = (obj = {}) => {
-  const s = new URLSearchParams(obj).toString();
+/* Build query string */
+function qs(obj = {}) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined || v === null || v === '') continue;
+    params.append(k, String(v));
+  }
+  const s = params.toString();
   return s ? `?${s}` : '';
-};
+}
 
-/* api actions */
+/* Build params for server-side filtering */
+function paramsForLoad() {
+  const params = {};
+  if (mine.value)         params.mine = 1;
+  if (assignedToMe.value) params.assignedToMe = 1;
+  if (open.value)         params.open = 1;
+  if (statusFilter.value) params.status = statusFilter.value;
+  if (typeFilter.value)   params.purchaseType = typeFilter.value;
+  // production is scoped via x-production-id header
+  return params;
+}
+
+/* api: server does mine/assigned/open/status/type; client does q + handOnly */
 const load = async () => {
-  loading.value = true; error.value = '';
+  loading.value = true;
+  error.value = '';
   try {
     await ensureProductionId();
     const query = qs(paramsForLoad());
     const res = await api.get(`/tenant/runsheets${query}`);
-    list.value = Array.isArray(res) ? res : (res.items || []);
+    list.value = Array.isArray(res) ? res : (res.items || res.results || []);
     stamp();
   } catch (e) {
     error.value = e?.body?.error || e?.message || 'Failed to load runsheets';
@@ -405,7 +414,9 @@ function normalizeImg(src) {
       if (path.startsWith('/api/uploads/')) return `${u.origin}${tail}`;
       if (path.startsWith('/uploads/')) return `${u.origin}/api${tail}`;
       return `${u.origin}${tail}`;
-    } catch {}
+    } catch {
+      // fall through
+    }
   }
 
   s = s.replace(/\\/g, '/');
@@ -456,7 +467,8 @@ function onImgError(e) {
 
 /* create */
 const createRS = async () => {
-  creating.value = true; error.value = '';
+  creating.value = true;
+  error.value = '';
   try {
     const pid = await ensureProductionId();
     if (!pid) throw new Error('No production selected');
@@ -476,7 +488,8 @@ const createRS = async () => {
 };
 
 const createRSByHand = async () => {
-  creatingHand.value = true; error.value = '';
+  creatingHand.value = true;
+  error.value = '';
   try {
     const pid = await ensureProductionId();
     if (!pid) throw new Error('No production selected');
@@ -550,7 +563,9 @@ const ensureDetails = async (r) => {
   try {
     const full = await api.get(`/tenant/runsheets/${r._id}`);
     details.value = { ...details.value, [r._id]: full };
-  } catch {}
+  } catch {
+    // ignore
+  }
 };
 
 /* assignment + status actions */
@@ -591,7 +606,7 @@ const toggleAssign = (r = null) => {
 const fetchUsers = async () => {
   try {
     const term = userQuery.value?.trim() || '';
-    users.value = await api.get(`/users${term ? `?q=${encodeURIComponent(term)}` : ''}`);
+    users.value = await api.get(`/tenant/members${term ? `?q=${encodeURIComponent(term)}` : ''}`);
   } catch (e) {
     assignError.value = e?.body?.error || e?.message || 'Failed to search users';
   }
@@ -675,27 +690,15 @@ const del = async (r) => {
 };
 
 /* computed + routing */
+/* Only do LOCAL filters here: q (title) + handOnly. All others are server side. */
 const filteredList = computed(() => {
   const term = q.value.trim().toLowerCase();
-  const wantMine = !!mine.value;
-  const wantAssignedToMe = !!assignedToMe.value;
-  const wantOpen = !!open.value;
-  const wantStatus = statusFilter.value;
-  const wantType = typeFilter.value;
   const wantHand = !!handOnly.value;
-  const myId = me.value?._id || '';
 
   return (list.value || []).filter((r) => {
     const titleOk = !term || (r.title || '').toLowerCase().includes(term);
-    const typeOk = !wantType || (r.purchaseType || '').toLowerCase() === wantType;
-    const statusOk = !wantStatus || (r.status || '') === wantStatus;
-
-    const mineOk = !wantMine || ((r.createdBy?._id || r.createdBy) === myId);
-    const assignedOk = !wantAssignedToMe || ((r.assignedTo?._id || r.assignedTo) === myId);
-    const openOk = !wantOpen || (r.status === 'open' && !r.assignedTo);
     const handOk = !wantHand || isHandwritten(r);
-
-    return titleOk && typeOk && statusOk && mineOk && assignedOk && openOk && handOk;
+    return titleOk && handOk;
   });
 });
 
@@ -706,21 +709,19 @@ function viewRoute(r) {
   return { name: 'runsheet-view', params: { slug: slug.value, id: r._id } };
 }
 
-/* watch filters -> reload (debounced) */
-let loadTimer;
-const scheduleLoad = (delay = 250) => {
-  clearTimeout(loadTimer);
-  loadTimer = setTimeout(load, delay);
-};
-
-watch([statusFilter, typeFilter, mine, assignedToMe, open, handOnly], () => scheduleLoad(0));
-watch(q, () => scheduleLoad(300));
-
 /* utils */
 const shortDate = (d) => {
   if (!d) return '—';
   try { return new Date(d).toLocaleDateString(); } catch { return '—'; }
 };
+
+/* watch filters -> reload from server when they change */
+watch(
+  [mine, assignedToMe, open, statusFilter, typeFilter],
+  () => {
+    load();
+  }
+);
 
 /* boot */
 onMounted(async () => {
@@ -740,7 +741,6 @@ onMounted(async () => {
 }
 .hidden { display: none; }
 </style>
-
 
 <style scoped>
 :root{
@@ -766,7 +766,8 @@ onMounted(async () => {
 
 /* Toolbar */
 .toolbar{
-  display:grid;grid-template-columns:auto auto auto auto auto 1fr auto auto;
+  display:grid;
+  grid-template-columns:auto auto auto auto auto 1fr auto auto;
   gap:10px;align-items:center;
   background:var(--panel);border:1px solid var(--line-light);border-radius:12px;
   padding:12px;margin-bottom:16px;box-shadow:var(--shadow-soft);
@@ -829,7 +830,7 @@ onMounted(async () => {
   box-shadow:0 0 0 2px rgba(255,255,255,.08),var(--shadow-inset);
 }
 
-/* Checkboxes (black border) */
+/* Checkboxes */
 .check{display:inline-flex;align-items:center;gap:8px;color:var(--ink);user-select:none}
 .check input[type="checkbox"]{
   appearance:none;width:18px;height:18px;cursor:pointer;
@@ -875,7 +876,9 @@ onMounted(async () => {
 
 /* Empty state */
 .empty{
-  text-align:center;color:var(--muted);padding:30px 10px;
+  text-align:center;
+  color:#fff; /* brighter so it doesn't look like a dead black block */
+  padding:30px 10px;
   border:1px dashed var(--line-light);border-radius:12px;background:#111418;
   box-shadow:var(--shadow-soft) inset;
 }
@@ -902,8 +905,6 @@ onMounted(async () => {
   .assign__row{grid-template-columns:1fr}
 }
 </style>
-
-
 
 
 

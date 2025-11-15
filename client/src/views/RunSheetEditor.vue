@@ -1345,7 +1345,7 @@ const onPurchaseTypeChanged = async (ev) => {
 const cbSearch = ref('');
 const cbResults = ref([]);
 const searchCompletedUsers = async () => {
-  try { cbResults.value = await api.get('/tenant/users/',); }
+  try { cbResults.value = await api.get('/tenant/members/',); }
   catch (e) { error.value = e?.response?.data?.error || 'Failed to search users'; }
 };
 const selectCompletedBy = async (u) => { if (!rs.value) return; rs.value.pdCompletedBy = u; await savePickupDelivering(); };
@@ -1878,7 +1878,7 @@ const uploadRunItemPhotos = async (_stopId, _idx, e) => {
 const userSearch = ref('');
 const userResults = ref([]);
 const searchUsers = async () => {
-  try { userResults.value = await api.get('/tenant/users', { q: userSearch.value }); }
+  try { userResults.value = await api.get('/tenant/members', { q: userSearch.value }); }
   catch (e) { error.value = e?.response?.data?.error || 'Failed to search users'; }
 };
 const assign = async (u) => {

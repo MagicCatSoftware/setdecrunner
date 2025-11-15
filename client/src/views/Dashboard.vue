@@ -7,18 +7,50 @@
       <section class="panel">
         <div class="header-row">
           <h1 class="title">Welcome, {{ me?.name || '—' }}</h1>
-          
 
           <div class="spacer"></div>
 
           <div class="actions">
-            <RouterLink class="nav__link" :to="{ name: 'driver', params: { slug } }" draggable="false">Driver</RouterLink>
-           
-            <RouterLink class="nav__link" :to="{ name: 'runsheets', params: { slug } }" draggable="false">Runsheets</RouterLink>
-            <RouterLink class="nav__link" :to="{ name: 'items', params: { slug } }" draggable="false">Items</RouterLink>
-            <RouterLink class="nav__link" :to="{ name: 'places', params: { slug } }" draggable="false">Dashboard</RouterLink>
-            <RouterLink v-if="me?.role==='admin'" class="btn" :to="{ name: 'admin/users', params: { slug } }">Items</RouterLink>
-            <RouterLink class="nav__link" :to="{ name: 'runsheet-new', params: { slug } }" draggable="false">Create Runsheet</RouterLink>
+            <!-- These first links were already working with slug -->
+            <RouterLink
+              class="nav__link"
+              :to="{ name: 'runsheets', params: { slug } }"
+              draggable="false"
+            >
+              Runsheets
+            </RouterLink>
+
+            <RouterLink
+              class="nav__link"
+              :to="{ name: 'items', params: { slug } }"
+              draggable="false"
+            >
+              Items
+            </RouterLink>
+
+            <RouterLink
+              class="nav__link"
+              :to="{ name: 'places', params: { slug } }"
+              draggable="false"
+            >
+              Dashboard
+            </RouterLink>
+
+            <RouterLink
+              v-if="me?.role === 'admin'"
+              class="btn"
+              :to="{ name: 'admin/users', params: { slug } }"
+            >
+              Items
+            </RouterLink>
+
+            <RouterLink
+              class="nav__link"
+              :to="{ name: 'runsheet-new', params: { slug } }"
+              draggable="false"
+            >
+              Create Runsheet
+            </RouterLink>
           </div>
         </div>
         <p class="muted">Use the shortcuts above to jump right in.</p>
@@ -86,7 +118,13 @@
 
             <div class="item__main">
               <div class="item__title">
-                <RouterLink class="link" :to="'/tenant/runsheets/'+r._id">{{ r.title || 'Untitled' }}</RouterLink>
+                <!-- FIX: include slug in the route -->
+                <RouterLink
+                  class="link"
+                  :to="`/${slug}/runsheets/${r._id}`"
+                >
+                  {{ r.title || 'Untitled' }}
+                </RouterLink>
                 <span class="badge">{{ r.status }}</span>
               </div>
               <div class="meta">
@@ -97,25 +135,38 @@
             </div>
 
             <div class="item__actions">
-              <RouterLink class="btn" :to="'/tenant/runsheets/'+r._id">Open</RouterLink>
-              <button
-                v-if="r.status==='open' && !r.assignedTo"
+              <!-- FIX: include slug in the route -->
+              <RouterLink
                 class="btn"
-                :disabled="busyId===r._id"
+                :to="`/${slug}/runsheets/${r._id}`"
+              >
+                Open
+              </RouterLink>
+
+              <button
+                v-if="r.status === 'open' && !r.assignedTo"
+                class="btn"
+                :disabled="busyId === r._id"
                 @click="claim(r)"
-              >Claim</button>
+              >
+                Claim
+              </button>
               <button
-                v-if="r.status==='assigned' || r.status==='claimed'"
+                v-if="r.status === 'assigned' || r.status === 'claimed'"
                 class="btn"
-                :disabled="busyId===r._id"
-                @click="setStatus(r,'in_progress')"
-              >Start</button>
+                :disabled="busyId === r._id"
+                @click="setStatus(r, 'in_progress')"
+              >
+                Start
+              </button>
               <button
-                v-if="r.status==='in_progress'"
+                v-if="r.status === 'in_progress'"
                 class="btn"
-                :disabled="busyId===r._id"
-                @click="setStatus(r,'completed')"
-              >Complete</button>
+                :disabled="busyId === r._id"
+                @click="setStatus(r, 'completed')"
+              >
+                Complete
+              </button>
             </div>
           </div>
 
@@ -132,12 +183,19 @@
 
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useAuth } from '../auth.js';
 import NavBar from '../components/NavBar.vue';
 import api from '../api.js';
 
 const auth = useAuth();
+const route = useRoute();
+const router = useRouter();
+
+// Current production slug from the route
+const slug = computed(() => route.params.slug);
+
+// State
 const me = ref(null);
 const loading = ref(false);
 const creating = ref(false);
@@ -153,8 +211,8 @@ const imageUrl = (p) => {
   if (!p) return '';
   // If already absolute (http/https/data), return as-is
   if (/^(https?:)?\/\//i.test(p) || /^data:/i.test(p)) return p;
-  // If relative like "/uploads/...", prefix server origin (remove "/api")
-  if (p.startsWith('/')) return apiBase.replace('','') + p;
+  // If relative like "/uploads/...", prefix server origin (remove "/api" if needed)
+  if (p.startsWith('/')) return apiBase.replace('', '') + p;
   // Otherwise, assume it's already resolvable
   return p;
 };
@@ -260,6 +318,10 @@ const clearMarkers = () => {
   markers.value = [];
 };
 
+const escapeHtml = (s) => String(s).replace(/[&<>"'`=\/]/g, (c) => ({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','`':'&#x60;','=':'&#x3D;'
+}[c]));
+
 const renderMarkers = (gmaps) => {
   if (!map.value) return;
   clearMarkers();
@@ -297,10 +359,6 @@ const renderMarkers = (gmaps) => {
     map.value.setZoom(8);
   }
 };
-
-const escapeHtml = (s) => String(s).replace(/[&<>"'`=\/]/g, (c) => ({
-  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','`':'&#x60;','=':'&#x3D;'
-}[c]));
 
 /** Fetch places and (re)render markers */
 const refreshPlaces = async () => {
@@ -406,7 +464,8 @@ const createRS = async () => {
   creating.value = true; error.value = '';
   try {
     const rs = await api.post('/tenant/runsheets', { title: 'Untitled', status: 'draft' });
-    location.href = `/tenant/runsheets/${rs._id}`;
+    // FIX: include slug in the navigation
+    await router.push(`/${slug.value}/runsheets/${rs._id}`);
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to create runsheet';
   } finally {
@@ -441,12 +500,18 @@ const setStatus = async (r, status) => {
 const recent = computed(() => list.value);
 
 onMounted(async () => {
-  try { me.value = await apiGet('/tenant/tenantauth/me'); } catch { me.value = null; }
+  try {
+    // FIX: use api.get instead of apiGet
+    me.value = await api.get('/tenant/tenantauth/me');
+  } catch {
+    me.value = null;
+  }
   await load();
   await initMap();
   await refreshPlaces();
 });
 </script>
+
 
 
   
