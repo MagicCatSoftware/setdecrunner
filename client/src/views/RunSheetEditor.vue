@@ -638,6 +638,15 @@
 </div>
 
 
+<div class="field">
+  <input
+    type="date" id="pdCompletedOn"
+    v-model="dateFinishedStr"
+    @change="savePickupDelivering"
+  />
+</div>
+
+
 <!-- Pickup Signature -->
 <div class="field">
   <div class="label">Pickup Signature</div>
@@ -675,13 +684,6 @@
   </div>
 </div>
 
-<div class="field">
-  <input
-    type="date" id="pdCompletedOn"
-    v-model="dateFinishedStr"
-    @change="savePickupDelivering"
-  />
-</div>
 
  
 </section>
@@ -942,12 +944,17 @@ import { useRoute, useRouter } from 'vue-router';
 import NavBar from '../components/NavBar.vue';
 import PlaceSearch from '../components/PlaceSearch.vue';
 import api from '../api.js';
+import { useAuth } from '../auth';
 
+const { me } = useAuth();
 const route = useRoute();
 const router = useRouter();
 
-const me = ref(null);
+/* ------------------------------ QC state ------------------------------ */
+
 const itemsGoodSaving = ref(false);
+
+/* ------------------------- Signature canvases (QC) ------------------------ */
 const sigCanvas = ref(null);
 let sigCtx = null;
 let sigDrawing = false;
@@ -955,6 +962,7 @@ let sigLastX = 0;
 let sigLastY = 0;
 const sigSaving = ref(false);
 
+/* ---------------------- Signature canvases (PD / RD) ---------------------- */
 const pdSigCanvas = ref(null);
 const rdSigCanvas = ref(null);
 
@@ -971,6 +979,8 @@ let rdSigLastY = 0;
 
 const pdSigSaving = ref(false);
 const rdSigSaving = ref(false);
+
+/* ------------------------------ Runsheet data ----------------------------- */
 
 const rs = ref({
   title: '',
@@ -1017,8 +1027,9 @@ const rs = ref({
   pdDate: null,
   pdTime: '',
   pdInstructions: '',
-  pdCompletedBy: null,      // legacy UI
-  pdCompletedOn: null,     // legacy UI
+  pdCompletedBy: null,
+  pdCompletedOn: null,
+  pdSignatureData: '',
 
   // Return / Drop Off
   rdType: null,
@@ -1028,10 +1039,14 @@ const rs = ref({
   rdInstructions: '',
   rdCompletedBy: null,
   rdCompletedOn: null,
+  rdSignatureData: '',
 
   // QC
   qcItemsGood: null,
-  qcSignatureData: ''
+  qcSignatureData: '',
+
+  // Assignment
+  assignedTo: null
 });
 
 const saving = ref(false);
@@ -1039,18 +1054,23 @@ const savedAt = ref('');
 const error = ref('');
 const loading = ref(false);
 
-const stamp = () => { savedAt.value = new Date().toLocaleTimeString(); };
-
+const stamp = () => {
+  savedAt.value = new Date().toLocaleTimeString();
+};
 
 /* ===================== People (single-select contact) ===================== */
+
 const people = ref([]);
 const peopleError = ref('');
 const selectedPersonId = ref(null);
 const contactSaving = ref(false);
 
 const loadPeople = async () => {
-  try { people.value = await api.get('/tenant/people', { limit: 100 }); }
-  catch (e) { peopleError.value = e?.response?.data?.error || 'Failed to load people'; }
+  try {
+    people.value = await api.get('/tenant/people', { limit: 100 });
+  } catch (e) {
+    peopleError.value = e?.response?.data?.error || 'Failed to load people';
+  }
 };
 
 const saveContactSelection = async () => {
@@ -1069,6 +1089,29 @@ const saveContactSelection = async () => {
   }
 };
 
+const onTogglePerson = (p, ev) => {
+  const willCheck = ev.target.checked;
+  selectedPersonId.value = willCheck ? p._id : null;
+  ev.target.checked = willCheck;
+  saveContactSelection();
+};
+
+const clearContact = () => {
+  selectedPersonId.value = null;
+  saveContactSelection();
+};
+
+const selectedPersonLabel = computed(() => {
+  const id = selectedPersonId.value;
+  if (!id) return '';
+  const p = people.value.find(x => x._id === id);
+  if (!p) return `#${id}`;
+  const extra = [p.email, p.phone].filter(Boolean).join(' · ');
+  return extra ? `${p.name} — ${extra}` : p.name;
+});
+
+/* ============================= Canvas helpers ============================= */
+
 const getCanvasPos = (canvasRef, e) => {
   const el = canvasRef.value;
   if (!el) return { x: 0, y: 0 };
@@ -1085,9 +1128,8 @@ const getCanvasPos = (canvasRef, e) => {
   return { x, y };
 };
 
-
 /* ====================== Post-Run Destination helpers ====================== */
-// Label for the selected postPlace (when address_below)
+
 const postPlaceLabel = computed(() => {
   const p = rs.value?.postPlace;
   if (!p) return '';
@@ -1100,16 +1142,11 @@ async function togglePost(key, ev) {
   if (!rs.value?._id) return;
   const willCheck = !!ev?.target?.checked;
 
-  // If user checks this key, select it; if they uncheck the same key, clear it.
   const next = willCheck ? key : (rs.value.postLocation === key ? null : rs.value.postLocation);
-
-  // Update local model first
   rs.value.postLocation = next;
 
-  // Keep checkbox visually in sync with our local decision
   if (ev?.target) ev.target.checked = next === key;
 
-  // If switching AWAY from address_below, clear address/place and PATCH immediately
   if (next !== 'address_below') {
     rs.value.postPlace = null;
     rs.value.postAddress = '';
@@ -1126,19 +1163,15 @@ async function togglePost(key, ev) {
     return;
   }
 
-  // If we *are* switching TO address_below, only PATCH if we ALREADY have addr or place.
   const hasAddress =
     !!(rs.value.postAddress && rs.value.postAddress.toString().trim());
   const hasPlace =
     !!(rs.value.postPlace && (rs.value.postPlace._id || rs.value.postPlace));
 
   if (!hasAddress && !hasPlace) {
-    // Just let the UI show the checkbox and textarea/PlaceSearch;
-    // backend will be updated later via choosePostPlace() or savePostLocation().
     return;
   }
 
-  // We already have enough info, so it's safe to persist the address_below state now.
   try {
     await api.patch(`/tenant/runsheets/${rs.value._id}`, {
       postLocation: 'address_below',
@@ -1154,7 +1187,6 @@ async function togglePost(key, ev) {
   }
 }
 
-// Choosing a place when 'address_below' is active (from <PlaceSearch />)
 async function choosePostPlace(place) {
   if (!rs.value?._id) return;
   rs.value.postLocation = 'address_below';
@@ -1174,7 +1206,6 @@ async function choosePostPlace(place) {
   }
 }
 
-// Clear the chosen place (keeps postLocation as address_below so user can type an address)
 async function clearPostPlace() {
   if (!rs.value?._id) return;
   rs.value.postPlace = null;
@@ -1186,7 +1217,6 @@ async function clearPostPlace() {
   }
 }
 
-// Persist textarea changes to the address (only relevant for address_below)
 async function savePostLocation() {
   if (!rs.value?._id) return;
   try {
@@ -1203,52 +1233,58 @@ async function savePostLocation() {
   }
 }
 
-const onTogglePerson = (p, ev) => {
-  const willCheck = ev.target.checked;
-  selectedPersonId.value = willCheck ? p._id : null;
-  ev.target.checked = willCheck;
-  saveContactSelection();
-};
-const clearContact = () => { selectedPersonId.value = null; saveContactSelection(); };
-
-const selectedPersonLabel = computed(() => {
-  const id = selectedPersonId.value;
-  if (!id) return '';
-  const p = people.value.find(x => x._id === id);
-  if (!p) return `#${id}`;
-  const extra = [p.email, p.phone].filter(Boolean).join(' · ');
-  return extra ? `${p.name} — ${extra}` : p.name;
-});
-
 /* ============================== Dates ============================== */
+
 const dateStr = computed({
-  get() { const d = rs.value && rs.value.date && new Date(rs.value.date); return d && !isNaN(d) ? d.toISOString().slice(0,10) : ''; },
-  set(v) { if (rs.value) rs.value.date = v ? new Date(v).toISOString() : null; }
-});
-const pickupStr = computed({
-  get() { const d = rs.value && rs.value.pickupDate && new Date(rs.value.pickupDate); return d && !isNaN(d) ? d.toISOString().slice(0,10) : ''; },
-  set(v) { if (rs.value) rs.value.pickupDate = v ? new Date(v).toISOString() : null; }
-});
-const returnStr = computed({
-  get() { const d = rs.value && rs.value.returnDate && new Date(rs.value.returnDate); return d && !isNaN(d) ? d.toISOString().slice(0,10) : ''; },
-  set(v) { if (rs.value) rs.value.returnDate = v ? new Date(v).toISOString() : null; }
-});
-watch(() => rs.value && rs.value.pickupDate, (newPd) => {
-  if (!rs.value || rs.value.purchaseType !== 'rental' || !newPd) return;
-  if (!rs.value.returnDate || new Date(rs.value.returnDate) < new Date(newPd)) {
-    const d = new Date(newPd); d.setDate(d.getDate() + 1);
-    rs.value.returnDate = d.toISOString();
+  get() {
+    const d = rs.value && rs.value.date && new Date(rs.value.date);
+    return d && !isNaN(d) ? d.toISOString().slice(0, 10) : '';
+  },
+  set(v) {
+    if (rs.value) rs.value.date = v ? new Date(v).toISOString() : null;
   }
 });
 
-// Upload photos to a catalog Item, then refresh attached list
+const pickupStr = computed({
+  get() {
+    const d = rs.value && rs.value.pickupDate && new Date(rs.value.pickupDate);
+    return d && !isNaN(d) ? d.toISOString().slice(0, 10) : '';
+  },
+  set(v) {
+    if (rs.value) rs.value.pickupDate = v ? new Date(v).toISOString() : null;
+  }
+});
+
+const returnStr = computed({
+  get() {
+    const d = rs.value && rs.value.returnDate && new Date(rs.value.returnDate);
+    return d && !isNaN(d) ? d.toISOString().slice(0, 10) : '';
+  },
+  set(v) {
+    if (rs.value) rs.value.returnDate = v ? new Date(v).toISOString() : null;
+  }
+});
+
+// Auto-bump return date when rental pickup changes
+watch(
+  () => rs.value && rs.value.pickupDate,
+  (newPd) => {
+    if (!rs.value || rs.value.purchaseType !== 'rental' || !newPd) return;
+    if (!rs.value.returnDate || new Date(rs.value.returnDate) < new Date(newPd)) {
+      const d = new Date(newPd);
+      d.setDate(d.getDate() + 1);
+      rs.value.returnDate = d.toISOString();
+    }
+  }
+);
+
+/* ================== Item photos on catalog items ================== */
+
 async function uploadItemPhotos(item, e) {
   try {
     const fd = new FormData();
     [...(e.target?.files || [])].forEach(f => fd.append('photos', f));
-    await api.post(`/tenant/items/${item._id}/photos`, fd, {
-      
-    });
+    await api.post(`/tenant/items/${item._id}/photos`, fd, {});
     await refreshAttachedItems();
   } catch (err) {
     itemListError.value = err?.response?.data?.error || 'Failed to upload item photos';
@@ -1257,7 +1293,6 @@ async function uploadItemPhotos(item, e) {
   }
 }
 
-// Update quantity of an attached (catalog) item
 async function updateAttachedQuantity(ai, val) {
   const q = Number(val);
   if (!ai._id || !Number.isFinite(q) || q < 0) return;
@@ -1270,32 +1305,42 @@ async function updateAttachedQuantity(ai, val) {
   }
 }
 
-// Create a new Item (JSON), optionally upload a photo, then attach to runsheet
+/* ================== Create & Add Item (simple JSON) ================== */
+
+const newItem = ref({ name: '', description: '', qty: 1, file: null, preview: '' });
+const creatingItem = ref(false);
+const createItemError = ref('');
+
+function onNewItemImage(e) {
+  const f = (e.target && e.target.files && e.target.files[0]) || null;
+  newItem.value.file = f;
+  newItem.value.preview = f ? URL.createObjectURL(f) : '';
+}
+
 async function createAndAddItem() {
   createItemError.value = '';
-  if (!newItem.value.name.trim()) { createItemError.value = 'Name is required'; return; }
+  if (!newItem.value.name.trim()) {
+    createItemError.value = 'Name is required';
+    return;
+  }
   creatingItem.value = true;
   try {
-    // 1) Create item (JSON, not multipart)
     const body = {
       name: newItem.value.name.trim(),
-      ...(newItem.value.description?.trim() ? { description: newItem.value.description.trim() } : {})
+      ...(newItem.value.description?.trim()
+        ? { description: newItem.value.description.trim() }
+        : {})
     };
     const created = await api.post('/tenant/items', body);
 
-    // 2) If a photo was chosen, upload to /items/:id/photos (field "photos")
     if (newItem.value.file) {
       const fd = new FormData();
       fd.append('photos', newItem.value.file);
-      await api.post(`/tenant/items/${created._id}/photos`, fd, {
-  
-      });
+      await api.post(`/tenant/items/${created._id}/photos`, fd, {});
     }
 
-    // 3) Attach to this runsheet
     await addItemToRunsheet(created._id, newItem.value.qty || 1);
 
-    // 4) Keep search results fresh, clear form, and refresh attached items (to see photos)
     itemResults.value.unshift(created);
     newItem.value = { name: '', description: '', qty: 1, file: null, preview: '' };
     await refreshAttachedItems();
@@ -1306,26 +1351,35 @@ async function createAndAddItem() {
   }
 }
 
+async function createAndAddItemToStop(_stopId_ignored) {
+  await createAndAddItem();
+}
+
+/* ===================== Purchase Type (purchase / rental) ===================== */
+
 const onPurchaseTypeChanged = async (ev) => {
   const current = rs.value && rs.value.purchaseType;
-  const val = (ev && ev.target && ev.target.value || current) === 'rental' ? 'rental' : 'purchase';
+  const val = ((ev && ev.target && ev.target.value) || current) === 'rental' ? 'rental' : 'purchase';
   if (!rs.value) return;
   rs.value.purchaseType = val;
   if (val === 'rental') {
     const todayISO = new Date().toISOString();
     if (!rs.value.pickupDate) rs.value.pickupDate = todayISO;
     if (!rs.value.returnDate || new Date(rs.value.returnDate) < new Date(rs.value.pickupDate)) {
-      const d = new Date(rs.value.pickupDate); d.setDate(d.getDate() + 1);
+      const d = new Date(rs.value.pickupDate);
+      d.setDate(d.getDate() + 1);
       rs.value.returnDate = d.toISOString();
     }
   }
   try {
     await api.patch(`/tenant/runsheets/${rs.value._id}`, {
       purchaseType: rs.value.purchaseType,
-      ...(rs.value.purchaseType === 'rental' ? {
-        pickupDate: rs.value.pickupDate,
-        returnDate: rs.value.returnDate
-      } : {})
+      ...(rs.value.purchaseType === 'rental'
+        ? {
+            pickupDate: rs.value.pickupDate,
+            returnDate: rs.value.returnDate
+          }
+        : {})
     });
     stamp();
   } catch (e) {
@@ -1333,25 +1387,75 @@ const onPurchaseTypeChanged = async (ev) => {
   }
 };
 
-/* =========== Users search: PD + RD have independent state =========== */
+/* =========== Users search: PD + RD + Assign (shared helper) =========== */
 
-// Pickup/Delivering
-const pdSearch    = ref('');
-const pdResults   = ref([]);
+// Shared helper: tolerant to multiple response shapes from /tenant/members
+async function fetchMembers(term) {
+  const q = (term || '').trim();
+  const params = q ? { q } : {};
+
+  const res = await api.get('/tenant/members', params);
+
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res.members)) return res.members;
+  if (res && Array.isArray(res.users)) return res.users;
+  if (res && Array.isArray(res.items)) return res.items;
+  if (res && Array.isArray(res.data)) return res.data;
+  if (res && Array.isArray(res.results)) return res.results;
+
+  return [];
+}
+
+/* ------- Member cache so completedBy / assignedTo can hydrate ------- */
+
+const allMembers = ref([]);
+const memberMap = computed(() => {
+  const m = {};
+  for (const u of allMembers.value || []) {
+    if (u && u._id) m[u._id] = u;
+  }
+  return m;
+});
+
+async function hydrateCompletedUsers() {
+  try {
+    allMembers.value = await fetchMembers('');
+    const map = memberMap.value;
+
+    const maybeHydrate = (field) => {
+      if (!rs.value) return;
+      const v = rs.value[field];
+      if (!v) return;
+
+      if (typeof v === 'object') {
+        const id = v._id;
+        if (id && map[id]) rs.value[field] = map[id];
+        return;
+      }
+
+      if (typeof v === 'string' && map[v]) {
+        rs.value[field] = map[v];
+      }
+    };
+
+    maybeHydrate('pdCompletedBy');
+    maybeHydrate('rdCompletedBy');
+    maybeHydrate('assignedTo');
+  } catch {
+    // non-fatal
+  }
+}
+
+/* ---------------- Pickup / Delivering: Completed By ---------------- */
+
+const pdSearch = ref('');
+const pdResults = ref([]);
 const pdSearching = ref(false);
 
-// Return/Drop Off
-const rdSearch    = ref('');
-const rdResults   = ref([]);
-const rdSearching = ref(false);
-
-// --- Pickup search ---
 const searchPdUsers = async () => {
   pdSearching.value = true;
   try {
-    pdResults.value = await api.get('/tenant/members', {
-      q: (pdSearch.value || '').trim()
-    });
+    pdResults.value = await fetchMembers(pdSearch.value);
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to search users';
     pdResults.value = [];
@@ -1375,14 +1479,25 @@ const clearCompletedBy = async () => {
 const completedByLabel = computed(() => {
   const v = rs.value && rs.value.pdCompletedBy;
   if (!v) return '';
-  if (typeof v === 'string') {
-    const hit = (pdResults.value || []).find(x => x._id === v);
-    return hit ? (hit.name || hit.email || hit._id) : `#${v}`;
+
+  if (typeof v === 'object') {
+    return v.name || v.email || v._id || '';
   }
-  return v.name || v.email || v._id || '';
+
+  const cached = memberMap.value[v];
+  if (cached) return cached.name || cached.email || cached._id;
+
+  const hit = (pdResults.value || []).find(x => x._id === v) || null;
+  if (hit) return hit.name || hit.email || hit._id;
+  return `#${v}`;
 });
 
-// --- Return search (with debounce) ---
+/* ---------------- Return / Drop Off: Completed By ---------------- */
+
+const rdSearch = ref('');
+const rdResults = ref([]);
+const rdSearching = ref(false);
+
 let rdSearchTimer = null;
 function debouncedSearchRdUsers() {
   clearTimeout(rdSearchTimer);
@@ -1392,9 +1507,7 @@ function debouncedSearchRdUsers() {
 const searchRdUsers = async () => {
   rdSearching.value = true;
   try {
-    rdResults.value = await api.get('/tenant/members', {
-      q: (rdSearch.value || '').trim()
-    });
+    rdResults.value = await fetchMembers(rdSearch.value);
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to search users';
     rdResults.value = [];
@@ -1409,29 +1522,109 @@ const selectRdCompletedBy = async (u) => {
   await saveReturnDropoff();
 };
 
+const clearRdCompletedBy = async () => {
+  if (!rs.value) return;
+  rs.value.rdCompletedBy = null;
+  await saveReturnDropoff();
+};
+
 const rdCompletedByLabel = computed(() => {
   const v = rs.value && rs.value.rdCompletedBy;
   if (!v) return '';
-  if (typeof v === 'string') {
-    const hit = (rdResults.value || []).find(x => x._id === v);
-    return hit ? (hit.name || hit.email || hit._id) : `#${v}`;
+
+  if (typeof v === 'object') {
+    return v.name || v.email || v._id || '';
   }
-  return v.name || v.email || v._id || '';
+
+  const cached = memberMap.value[v];
+  if (cached) return cached.name || cached.email || cached._id;
+
+  const hit = (rdResults.value || []).find(x => x._id === v) || null;
+  if (hit) return hit.name || hit.email || hit._id;
+  return `#${v}`;
 });
 
+/* ---------------- Assign to driver ---------------- */
 
-/* ============================== Load ============================== */
+const userSearch = ref('');
+const userResults = ref([]);
+
+const searchUsers = async () => {
+  try {
+    userResults.value = await fetchMembers(userSearch.value);
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to search users';
+    userResults.value = [];
+  }
+};
+
+const assignedToLabel = computed(() => {
+  const v = rs.value && rs.value.assignedTo;
+  if (!v) return '';
+
+  if (typeof v === 'object') {
+    return v.name || v.email || v._id || '';
+  }
+
+  const cached = memberMap.value[v];
+  if (cached) return cached.name || cached.email || cached._id;
+
+  const hit = (userResults.value || []).find(x => x._id === v) || null;
+  if (hit) return hit.name || hit.email || hit._id;
+  return `#${v}`;
+});
+
+const assign = async (u) => {
+  if (!rs.value || !rs.value._id) return;
+
+  try {
+    const resp = await api.post(
+      `/tenant/runsheets/${rs.value._id}/assign`,
+      { userId: u._id }
+    );
+
+    if (resp && resp._id) {
+      rs.value = { ...rs.value, ...resp };
+    } else if (resp && (resp.assignedTo || resp.status)) {
+      if (resp.assignedTo !== undefined) {
+        rs.value.assignedTo = resp.assignedTo;
+      } else {
+        rs.value.assignedTo = u._id;
+      }
+      if (resp.status) rs.value.status = resp.status;
+    } else {
+      rs.value.assignedTo = u._id;
+      rs.value.status = 'assigned';
+    }
+
+    const map = memberMap.value;
+    const v = rs.value.assignedTo;
+    if (typeof v === 'string' && map[v]) {
+      rs.value.assignedTo = map[v];
+    }
+
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to assign';
+  }
+};
+
+/* ============================== Load helpers ============================== */
+
 const hydratePostPlace = async () => {
   if (rs.value && rs.value.postPlace && typeof rs.value.postPlace === 'string') {
-    try { rs.value.postPlace = await api.get(`/tenant/places/${rs.value.postPlace}`); } catch (e) {}
+    try {
+      rs.value.postPlace = await api.get(`/tenant/places/${rs.value.postPlace}`);
+    } catch (e) { /* ignore */ }
   }
 };
 
 const load = async () => {
+  loading.value = true;
   try {
     rs.value = await api.get(`/tenant/runsheets/${route.params.id}`);
 
-    // Defaults
+    // Normalise purchase fields
     if (rs.value.purchaseType == null) rs.value.purchaseType = 'purchase';
     if (rs.value.pickupDate == null) rs.value.pickupDate = null;
     if (rs.value.returnDate == null) rs.value.returnDate = null;
@@ -1453,8 +1646,6 @@ const load = async () => {
     if (rs.value.pdDate == null) rs.value.pdDate = null;
     if (rs.value.pdTime == null) rs.value.pdTime = '';
     if (rs.value.pdInstructions == null) rs.value.pdInstructions = '';
-    if (rs.value.pdCompletedBy == null) rs.value.pdCompletedBy = null; // legacy UI
-    if (rs.value.pdCompletedOn == null) rs.value.pdCompletedOn = null; // legacy UI
 
     if (rs.value.getInvoice == null) rs.value.getInvoice = false;
     if (rs.value.getDeposit == null) rs.value.getDeposit = false;
@@ -1475,24 +1666,129 @@ const load = async () => {
     if (rs.value.qcItemsGood == null) rs.value.qcItemsGood = null;
     if (rs.value.qcSignatureData == null) rs.value.qcSignatureData = '';
 
-    if (rs.value.supplier == null) rs.value.supplier = null;
+    if (rs.value.pdSignatureData == null) rs.value.pdSignatureData = '';
+    if (rs.value.rdSignatureData == null) rs.value.rdSignatureData = '';
+
+    // Supplier hydration
+    if (rs.value.supplier == null) {
+      rs.value.supplier = null;
+      selectedSupplier.value = null;
+    } else if (typeof rs.value.supplier === 'object') {
+      selectedSupplier.value = rs.value.supplier;
+    } else if (typeof rs.value.supplier === 'string') {
+      try {
+        const s = await api.get(`/tenant/suppliers/${rs.value.supplier}`);
+        rs.value.supplier = s;
+        selectedSupplier.value = s;
+      } catch (e) {
+        selectedSupplier.value = null;
+      }
+    }
 
     if (rs.value.set && typeof rs.value.set === 'string') {
-      try { rs.value.set = await api.get(`/tenant/sets/${rs.value.set}`); } catch (e) {}
+      try {
+        rs.value.set = await api.get(`/tenant/sets/${rs.value.set}`);
+      } catch (e) { /* ignore */ }
     }
 
     selectedPersonId.value = rs.value.contact
-      ? (typeof rs.value.contact === 'string' ? rs.value.contact : (rs.value.contact && rs.value.contact._id) || null)
+      ? (typeof rs.value.contact === 'string'
+        ? rs.value.contact
+        : (rs.value.contact && rs.value.contact._id) || null)
       : null;
 
     await hydratePostPlace();
-    await refreshAttachedItems(); // hydrate runsheet-level items
+    await refreshAttachedItems();
+
+    await hydrateCompletedUsers();
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to load runsheet';
+  } finally {
+    loading.value = false;
   }
 };
 
 /* ============================== QC / Signature ============================== */
+
+const getSigPos = (e) => {
+  const rect = sigCanvas.value.getBoundingClientRect();
+  const isTouch = e.touches && e.touches[0];
+  const clientX = isTouch ? e.touches[0].clientX : e.clientX;
+  const clientY = isTouch ? e.touches[0].clientY : e.clientY;
+  const x = (clientX - rect.left) * (sigCanvas.value.width / rect.width);
+  const y = (clientY - rect.top) * (sigCanvas.value.height / rect.height);
+  return { x, y };
+};
+
+const sigStart = (e) => {
+  if (!sigCtx) return;
+  sigDrawing = true;
+  const { x, y } = getSigPos(e);
+  sigLastX = x;
+  sigLastY = y;
+};
+
+const sigMove = (e) => {
+  if (!sigDrawing || !sigCtx) return;
+  const { x, y } = getSigPos(e);
+  sigCtx.beginPath();
+  sigCtx.moveTo(sigLastX, sigLastY);
+  sigCtx.lineTo(x, y);
+  sigCtx.stroke();
+  sigLastX = x;
+  sigLastY = y;
+};
+
+const sigEnd = () => {
+  sigDrawing = false;
+};
+
+const clearSignature = () => {
+  if (sigCtx && sigCanvas.value) {
+    sigCtx.clearRect(0, 0, sigCanvas.value.width, sigCanvas.value.height);
+  }
+};
+
+const initSignatureCanvas = () => {
+  if (!sigCanvas.value) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = sigCanvas.value.clientWidth || 600;
+  const cssH = sigCanvas.value.clientHeight || 180;
+  sigCanvas.value.width = Math.round(cssW * dpr);
+  sigCanvas.value.height = Math.round(cssH * dpr);
+  sigCtx = sigCanvas.value.getContext('2d');
+  sigCtx.scale(dpr, dpr);
+  sigCtx.lineCap = 'round';
+  sigCtx.lineJoin = 'round';
+  sigCtx.lineWidth = 2;
+  sigCtx.strokeStyle = '#111';
+};
+
+let sigResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(sigResizeTimer);
+  sigResizeTimer = setTimeout(() => {
+    initSignatureCanvas();
+    initPickupSignatureCanvas();
+    initReturnSignatureCanvas();
+  }, 150);
+});
+
+const saveSignature = async () => {
+  if (!rs.value || !rs.value._id || !sigCanvas.value) return;
+  sigSaving.value = true;
+  try {
+    const dataUrl = sigCanvas.value.toDataURL('image/png');
+    rs.value.qcSignatureData = dataUrl;
+    await api.patch(`/tenant/runsheets/${rs.value._id}`, { qcSignatureData: dataUrl });
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to save signature';
+  } finally {
+    sigSaving.value = false;
+  }
+};
+
 const setItemsGood = async (val) => {
   if (!rs.value || !rs.value._id) return;
   itemsGoodSaving.value = true;
@@ -1508,59 +1804,7 @@ const setItemsGood = async (val) => {
   }
 };
 
-const getSigPos = (e) => {
-  const rect = sigCanvas.value.getBoundingClientRect();
-  const isTouch = e.touches && e.touches[0];
-  const clientX = isTouch ? e.touches[0].clientX : e.clientX;
-  const clientY = isTouch ? e.touches[0].clientY : e.clientY;
-  const x = (clientX - rect.left) * (sigCanvas.value.width / rect.width);
-  const y = (clientY - rect.top) * (sigCanvas.value.height / rect.height);
-  return { x, y };
-};
-const sigStart = (e) => { if (!sigCtx) return; sigDrawing = true; const { x, y } = getSigPos(e); sigLastX = x; sigLastY = y; };
-const sigMove = (e) => {
-  if (!sigDrawing || !sigCtx) return;
-  const { x, y } = getSigPos(e);
-  sigCtx.beginPath(); sigCtx.moveTo(sigLastX, sigLastY); sigCtx.lineTo(x, y); sigCtx.stroke();
-  sigLastX = x; sigLastY = y;
-};
-const sigEnd = () => { sigDrawing = false; };
-const clearSignature = () => { if (sigCtx && sigCanvas.value) sigCtx.clearRect(0, 0, sigCanvas.value.width, sigCanvas.value.height); };
-const initSignatureCanvas = () => {
-  if (!sigCanvas.value) return;
-  const dpr = window.devicePixelRatio || 1;
-  const cssW = sigCanvas.value.clientWidth || 600;
-  const cssH = sigCanvas.value.clientHeight || 180;
-  sigCanvas.value.width = Math.round(cssW * dpr);
-  sigCanvas.value.height = Math.round(cssH * dpr);
-  sigCtx = sigCanvas.value.getContext('2d');
-  sigCtx.scale(dpr, dpr);
-  sigCtx.lineCap = 'round';
-  sigCtx.lineJoin = 'round';
-  sigCtx.lineWidth = 2;
-  sigCtx.strokeStyle = '#111';
-};
-let sigResizeTimer = null;
-window.addEventListener('resize', () => {
-  clearTimeout(sigResizeTimer);
-  sigResizeTimer = setTimeout(() => {
-    initSignatureCanvas();        // QC
-    initPickupSignatureCanvas();  // Pickup
-    initReturnSignatureCanvas();  // Return
-  }, 150);
-});
-const saveSignature = async () => {
-  if (!rs.value || !rs.value._id || !sigCanvas.value) return;
-  sigSaving.value = true;
-  try {
-    const dataUrl = sigCanvas.value.toDataURL('image/png');
-    rs.value.qcSignatureData = dataUrl;
-    await api.patch(`/tenant/runsheets/${rs.value._id}`, { qcSignatureData: dataUrl });
-    stamp();
-  } catch (e) {
-    error.value = e?.response?.data?.error || 'Failed to save signature';
-  } finally { sigSaving.value = false; }
-};
+/* ===================== Pickup Signature Canvas (PD) ===================== */
 
 const initPickupSignatureCanvas = () => {
   if (!pdSigCanvas.value) return;
@@ -1568,7 +1812,7 @@ const initPickupSignatureCanvas = () => {
   const cssW = pdSigCanvas.value.clientWidth || 600;
   const cssH = pdSigCanvas.value.clientHeight || 180;
 
-  pdSigCanvas.value.width  = Math.round(cssW * dpr);
+  pdSigCanvas.value.width = Math.round(cssW * dpr);
   pdSigCanvas.value.height = Math.round(cssH * dpr);
 
   pdSigCtx = pdSigCanvas.value.getContext('2d');
@@ -1579,13 +1823,59 @@ const initPickupSignatureCanvas = () => {
   pdSigCtx.strokeStyle = '#111';
 };
 
+const pdSigStart = (e) => {
+  if (!pdSigCtx) return;
+  pdSigDrawing = true;
+  const { x, y } = getCanvasPos(pdSigCanvas, e);
+  pdSigLastX = x;
+  pdSigLastY = y;
+};
+
+const pdSigMove = (e) => {
+  if (!pdSigDrawing || !pdSigCtx) return;
+  const { x, y } = getCanvasPos(pdSigCanvas, e);
+  pdSigCtx.beginPath();
+  pdSigCtx.moveTo(pdSigLastX, pdSigLastY);
+  pdSigCtx.lineTo(x, y);
+  pdSigCtx.stroke();
+  pdSigLastX = x;
+  pdSigLastY = y;
+};
+
+const pdSigEnd = () => {
+  pdSigDrawing = false;
+};
+
+const pdSigClear = () => {
+  if (pdSigCtx && pdSigCanvas.value) {
+    pdSigCtx.clearRect(0, 0, pdSigCanvas.value.width, pdSigCanvas.value.height);
+  }
+};
+
+const savePdSignature = async () => {
+  if (!rs.value || !rs.value._id || !pdSigCanvas.value) return;
+  pdSigSaving.value = true;
+  try {
+    const dataUrl = pdSigCanvas.value.toDataURL('image/png');
+    rs.value.pdSignatureData = dataUrl;
+    await api.patch(`/tenant/runsheets/${rs.value._id}`, { pdSignatureData: dataUrl });
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to save pickup signature';
+  } finally {
+    pdSigSaving.value = false;
+  }
+};
+
+/* ===================== Return Signature Canvas (RD) ===================== */
+
 const initReturnSignatureCanvas = () => {
   if (!rdSigCanvas.value) return;
   const dpr = window.devicePixelRatio || 1;
   const cssW = rdSigCanvas.value.clientWidth || 600;
   const cssH = rdSigCanvas.value.clientHeight || 180;
 
-  rdSigCanvas.value.width  = Math.round(cssW * dpr);
+  rdSigCanvas.value.width = Math.round(cssW * dpr);
   rdSigCanvas.value.height = Math.round(cssH * dpr);
 
   rdSigCtx = rdSigCanvas.value.getContext('2d');
@@ -1596,17 +1886,78 @@ const initReturnSignatureCanvas = () => {
   rdSigCtx.strokeStyle = '#111';
 };
 
+const rdSigStart = (e) => {
+  if (!rdSigCtx) return;
+  rdSigDrawing = true;
+  const { x, y } = getCanvasPos(rdSigCanvas, e);
+  rdSigLastX = x;
+  rdSigLastY = y;
+};
+
+const rdSigMove = (e) => {
+  if (!rdSigDrawing || !rdSigCtx) return;
+  const { x, y } = getCanvasPos(rdSigCanvas, e);
+  rdSigCtx.beginPath();
+  rdSigCtx.moveTo(rdSigLastX, rdSigLastY);
+  rdSigCtx.lineTo(x, y);
+  rdSigCtx.stroke();
+  rdSigLastX = x;
+  rdSigLastY = y;
+};
+
+const rdSigEnd = () => {
+  rdSigDrawing = false;
+};
+
+const rdSigClear = () => {
+  if (rdSigCtx && rdSigCanvas.value) {
+    rdSigCtx.clearRect(0, 0, rdSigCanvas.value.width, rdSigCanvas.value.height);
+  }
+};
+
+const saveRdSignature = async () => {
+  if (!rs.value || !rs.value._id || !rdSigCanvas.value) return;
+  rdSigSaving.value = true;
+  try {
+    const dataUrl = rdSigCanvas.value.toDataURL('image/png');
+    rs.value.rdSignatureData = dataUrl;
+    await api.patch(`/tenant/runsheets/${rs.value._id}`, { rdSignatureData: dataUrl });
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to save return signature';
+  } finally {
+    rdSigSaving.value = false;
+  }
+};
 
 /* ============================== Return / Drop Off ============================== */
+
 const rdDateStr = computed({
-  get() { const d = rs.value && rs.value.rdDate && new Date(rs.value.rdDate); return d && !isNaN(d) ? d.toISOString().slice(0,10) : ''; },
-  set(v) { if (rs.value) rs.value.rdDate = v ? new Date(v).toISOString() : null; }
+  get() {
+    const d = rs.value && rs.value.rdDate && new Date(rs.value.rdDate);
+    return d && !isNaN(d) ? d.toISOString().slice(0, 10) : '';
+  },
+  set(v) {
+    if (rs.value) rs.value.rdDate = v ? new Date(v).toISOString() : null;
+  }
 });
+
 const rdCompletedOnStr = computed({
-  get() { const d = rs.value && rs.value.rdCompletedOn && new Date(rs.value.rdCompletedOn); return d && !isNaN(d) ? d.toISOString().slice(0,10) : ''; },
-  set(v) { if (rs.value) rs.value.rdCompletedOn = v ? new Date(v).toISOString() : null; }
+  get() {
+    const d = rs.value && rs.value.rdCompletedOn && new Date(rs.value.rdCompletedOn);
+    return d && !isNaN(d) ? d.toISOString().slice(0, 10) : '';
+  },
+  set(v) {
+    if (rs.value) rs.value.rdCompletedOn = v ? new Date(v).toISOString() : null;
+  }
 });
-const onToggleRdCheque = async (ev) => { if (!rs.value) return; rs.value.rdCheque = !!ev.target.checked; ev.target.checked = rs.value.rdCheque; await saveReturnDropoff(); };
+
+const onToggleRdCheque = async (ev) => {
+  if (!rs.value) return;
+  rs.value.rdCheque = !!ev.target.checked;
+  ev.target.checked = rs.value.rdCheque;
+  await saveReturnDropoff();
+};
 
 const saveReturnDropoff = async () => {
   if (!rs.value || !rs.value._id) return;
@@ -1617,7 +1968,10 @@ const saveReturnDropoff = async () => {
       rdDate: rs.value.rdDate ?? null,
       rdTime: rs.value.rdTime || '',
       rdInstructions: rs.value.rdInstructions || '',
-      rdCompletedBy: (rs.value.rdCompletedBy && rs.value.rdCompletedBy._id) ?? rs.value.rdCompletedBy ?? null,
+      rdCompletedBy:
+        rs.value.rdCompletedBy && typeof rs.value.rdCompletedBy === 'object'
+          ? rs.value.rdCompletedBy._id
+          : rs.value.rdCompletedBy ?? null,
       rdCompletedOn: rs.value.rdCompletedOn ?? null,
     });
     stamp();
@@ -1627,19 +1981,27 @@ const saveReturnDropoff = async () => {
 };
 
 /* ============================== Pickup / Delivering ============================== */
+
 const pdDateStr = computed({
-  get() { const d = rs.value && rs.value.pdDate && new Date(rs.value.pdDate); return d && !isNaN(d) ? d.toISOString().slice(0,10) : ''; },
-  set(v) { if (rs.value) rs.value.pdDate = v ? new Date(v).toISOString() : null; }
+  get() {
+    const d = rs.value && rs.value.pdDate && new Date(rs.value.pdDate);
+    return d && !isNaN(d) ? d.toISOString().slice(0, 10) : '';
+  },
+  set(v) {
+    if (rs.value) rs.value.pdDate = v ? new Date(v).toISOString() : null;
+  }
 });
+
 const dateFinishedStr = computed({
   get() {
     const d = rs.value?.pdCompletedOn && new Date(rs.value.pdCompletedOn);
-    return d && !isNaN(d) ? d.toISOString().slice(0,10) : '';
+    return d && !isNaN(d) ? d.toISOString().slice(0, 10) : '';
   },
   set(v) {
     if (rs.value) rs.value.pdCompletedOn = v ? new Date(v).toISOString() : null;
   }
 });
+
 const savePickupDelivering = async () => {
   if (!rs.value || !rs.value._id) return;
   try {
@@ -1649,7 +2011,10 @@ const savePickupDelivering = async () => {
       pdDate: rs.value.pdDate ?? null,
       pdTime: rs.value.pdTime || '',
       pdInstructions: rs.value.pdInstructions || '',
-      pdCompletedBy: (rs.value.pdCompletedBy && rs.value.pdCompletedBy._id) ?? rs.value.pdCompletedBy ?? null,
+      pdCompletedBy:
+        rs.value.pdCompletedBy && typeof rs.value.pdCompletedBy === 'object'
+          ? rs.value.pdCompletedBy._id
+          : rs.value.pdCompletedBy ?? null,
       pdCompletedOn: rs.value.pdCompletedOn ?? null,
     });
     stamp();
@@ -1657,17 +2022,29 @@ const savePickupDelivering = async () => {
     error.value = e?.response?.data?.error || 'Failed to save pickup/delivering';
   }
 };
+
 /* ======================== Validate & Save core ======================== */
+
 const validateBeforeSave = () => {
   if (rs.value && rs.value.purchaseType === 'rental') {
-    if (!rs.value.pickupDate || !rs.value.returnDate) { error.value = 'Rental runsheets require both pickup and return dates.'; return false; }
-    if (new Date(rs.value.returnDate) < new Date(rs.value.pickupDate)) { error.value = 'Return date cannot be before pickup date.'; return false; }
+    if (!rs.value.pickupDate || !rs.value.returnDate) {
+      error.value = 'Rental runsheets require both pickup and return dates.';
+      return false;
+    }
+    if (new Date(rs.value.returnDate) < new Date(rs.value.pickupDate)) {
+      error.value = 'Return date cannot be before pickup date.';
+      return false;
+    }
   }
   if (rs.value && rs.value.postLocation === 'address_below' && !(rs.value.postAddress || '').trim()) {
-    if (!(rs.value.postPlace && rs.value.postPlace.address)) { error.value = 'Please provide the address for "Address Below".'; return false; }
+    if (!(rs.value.postPlace && rs.value.postPlace.address)) {
+      error.value = 'Please provide the address for "Address Below".';
+      return false;
+    }
   }
   return true;
 };
+
 const savePurchase = async () => {
   if (!rs.value || !rs.value._id) return;
   try {
@@ -1686,13 +2063,19 @@ const savePurchase = async () => {
   }
 };
 
+let savePurchaseTimer = null;
+const savePurchaseDebounced = () => {
+  clearTimeout(savePurchaseTimer);
+  savePurchaseTimer = setTimeout(savePurchase, 400);
+};
+
 const save = async () => {
   if (!rs.value || !rs.value._id) return;
   if (!validateBeforeSave()) return;
-  saving.value = true; error.value = '';
+  saving.value = true;
+  error.value = '';
 
   try {
-    // NOTE: runsheet-level items are managed via dedicated endpoints, not here.
     const payload = {
       title: rs.value.title,
       status: rs.value.status,
@@ -1704,12 +2087,14 @@ const save = async () => {
       set: (rs.value.set && rs.value.set._id) ?? rs.value.set ?? null,
       supplier: (rs.value.supplier && rs.value.supplier._id) ?? rs.value.supplier ?? null,
       postLocation: rs.value.postLocation ?? null,
-      postAddress: rs.value.postLocation === 'address_below'
-        ? (rs.value.postAddress || (rs.value.postPlace && rs.value.postPlace.address) || '')
-        : '',
-      postPlace: rs.value.postLocation === 'address_below'
-        ? ((rs.value.postPlace && rs.value.postPlace._id) ?? rs.value.postPlace ?? null)
-        : null,
+      postAddress:
+        rs.value.postLocation === 'address_below'
+          ? (rs.value.postAddress || (rs.value.postPlace && rs.value.postPlace.address) || '')
+          : '',
+      postPlace:
+        rs.value.postLocation === 'address_below'
+          ? ((rs.value.postPlace && rs.value.postPlace._id) ?? rs.value.postPlace ?? null)
+          : null,
       getInvoice: !!rs.value.getInvoice,
       getDeposit: !!rs.value.getDeposit,
       paid: !!rs.value.paid,
@@ -1722,28 +2107,37 @@ const save = async () => {
       pdDate: rs.value.pdDate ?? null,
       pdTime: rs.value.pdTime || '',
       pdInstructions: rs.value.pdInstructions || '',
-      pdCompletedBy:rs.value.pdCompletedBy,
-      pdCompletedOn:rs.value.pdCompletedOn,
+      pdCompletedBy:
+        (rs.value.pdCompletedBy && rs.value.pdCompletedBy._id) ??
+        rs.value.pdCompletedBy ??
+        null,
+      pdCompletedOn: rs.value.pdCompletedOn ?? null,
       rdType: rs.value.rdType ?? null,
       rdCheque: !!rs.value.rdCheque,
       rdDate: rs.value.rdDate ?? null,
       rdTime: rs.value.rdTime || '',
       rdInstructions: rs.value.rdInstructions || '',
-      rdCompletedBy: (rs.value.rdCompletedBy && rs.value.rdCompletedBy._id) ?? rs.value.rdCompletedBy ?? null,
+      rdCompletedBy:
+        (rs.value.rdCompletedBy && rs.value.rdCompletedBy._id) ??
+        rs.value.rdCompletedBy ??
+        null,
       rdCompletedOn: rs.value.rdCompletedOn ?? null,
     };
 
-    rs.value = await api.patch(`tenant/runsheets/${rs.value._id}`, payload);
+    rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, payload);
 
     if (!Array.isArray(rs.value.photos)) rs.value.photos = rs.value.photos || [];
     if (!Array.isArray(rs.value.receipts)) rs.value.receipts = rs.value.receipts || [];
     if (!Array.isArray(rs.value.items)) rs.value.items = rs.value.items || [];
 
     if (rs.value.set && typeof rs.value.set === 'string') {
-      try { rs.value.set = await api.get(`/tenant/sets/${rs.value.set}`); } catch (e) {}
+      try {
+        rs.value.set = await api.get(`/tenant/sets/${rs.value.set}`);
+      } catch (e) { /* ignore */ }
     }
     await hydratePostPlace();
-    await refreshAttachedItems(); // keep rs.items synced after save
+    await refreshAttachedItems();
+    await hydrateCompletedUsers();
     stamp();
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to save';
@@ -1753,15 +2147,14 @@ const save = async () => {
 };
 
 /* ============================ Media ============================ */
-const apiBase = (import.meta.env.IMAGE_BASE || '');
-const IMAGE_BASE = import.meta.env.VITE_IMAGE_BASE || '/api'; // leave empty for same-origin
+
+const IMAGE_BASE = import.meta.env.VITE_IMAGE_BASE || '/api';
 
 function imageUrl(p) {
   if (!p) return '';
-  if (/^https?:\/\//i.test(p)) return p; // already absolute
+  if (/^https?:\/\//i.test(p)) return p;
   let path = String(p);
 
-  // normalize to /uploads/...
   if (!path.startsWith('/')) {
     path = '/' + path;
   }
@@ -1769,11 +2162,11 @@ function imageUrl(p) {
     path = '/uploads/' + path.replace(/^\/+/, '');
   }
 
-  // encode just the filename, not the whole path
   const parts = path.split('/');
   const file = parts.pop();
   return (IMAGE_BASE + [...parts, encodeURIComponent(file)].join('/'));
 }
+
 const isImage = (path) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(path || '');
 
 const uploadPhotos = async (e) => {
@@ -1784,54 +2177,83 @@ const uploadPhotos = async (e) => {
     rs.value.photos = resp.photos;
     stamp();
   } catch (e2) {
-    console.log(error);
     error.value = e2?.response?.data?.error || 'Failed to upload photos';
-  } finally { e.target.value = ''; }
+  } finally {
+    e.target.value = '';
+  }
 };
+
 const removePhoto = async (url) => {
   try {
     const resp = await api.del(`/tenant/runsheets/${rs.value._id}/photos`, { url });
-    rs.value.photos = resp.photos; stamp();
-  } catch (e) { error.value = e?.response?.data?.error || 'Failed to remove photo'; }
+    rs.value.photos = resp.photos;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to remove photo';
+  }
 };
 
 const uploadReceipts = async (e) => {
   const fd = new FormData();
   [...e.target.files].forEach(f => fd.append('receipts', f));
   try {
-    const resp = await api.post(`/tenant/runsheets/${rs.value._id}/receipts`, fd,);
-    rs.value.receipts = resp.receipts || []; stamp();
+    const resp = await api.post(`/tenant/runsheets/${rs.value._id}/receipts`, fd);
+    rs.value.receipts = resp.receipts || [];
+    stamp();
   } catch (e2) {
     error.value = e2?.response?.data?.error || 'Failed to upload receipts';
-  } finally { e.target.value = ''; }
+  } finally {
+    e.target.value = '';
+  }
 };
+
 const removeReceipt = async (url) => {
   try {
-    const resp = await api.del(`tenant/runsheets/${rs.value._id}/receipts`, { url });
-    rs.value.receipts = resp.receipts || []; stamp();
-  } catch (e) { error.value = e?.response?.data?.error || 'Failed to remove receipt'; }
+    const resp = await api.del(`/tenant/runsheets/${rs.value._id}/receipts`, { url });
+    rs.value.receipts = resp.receipts || [];
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to remove receipt';
+  }
 };
 
 /* ============================ Stops ============================ */
+
 const addStop = async (place) => {
   try {
-    const updated = await api.post(`/tenant/runsheets/${rs.value._id}/stops`, { place: place._id, title: place.name, instructions: '' });
-    rs.value = updated; stamp();
-  } catch (e) { error.value = e?.response?.data?.error || 'Failed to add stop'; }
+    const updated = await api.post(`/tenant/runsheets/${rs.value._id}/stops`, {
+      place: place._id,
+      title: place.name,
+      instructions: ''
+    });
+    rs.value = updated;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to add stop';
+  }
 };
+
 const saveStop = async (s) => {
   try {
     const updated = await api.patch(`/tenant/runsheets/${rs.value._id}/stops/${s._id}`, s);
-    rs.value = updated; stamp();
-  } catch (e) { error.value = e?.response?.data?.error || 'Failed to save stop'; }
+    rs.value = updated;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to save stop';
+  }
 };
+
 const removeStop = async (stopId) => {
   if (!confirm('Remove this stop?')) return;
   try {
     const updated = await api.del(`/tenant/runsheets/${rs.value._id}/stops/${stopId}`);
-    rs.value = updated; stamp();
-  } catch (e) { error.value = e?.response?.data?.error || 'Failed to remove stop'; }
+    rs.value = updated;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to remove stop';
+  }
 };
+
 const moveStopUp = async (idx) => {
   if (idx <= 0) return;
   const arr = [...rs.value.stops];
@@ -1840,6 +2262,7 @@ const moveStopUp = async (idx) => {
   rs.value.stops = arr;
   await save();
 };
+
 const moveStopDown = async (idx) => {
   if (idx >= rs.value.stops.length - 1) return;
   const arr = [...rs.value.stops];
@@ -1849,15 +2272,15 @@ const moveStopDown = async (idx) => {
   await save();
 };
 
-/* ========= RUNSHEET-LEVEL ITEMS: search / attach / remove / create+attach ========= */
-const itemSearch     = ref('');
-const itemResults    = ref([]);
-const searchingItems = ref(false);
-const itemListError  = ref('');
-const attachedItems  = ref([]);
+/* ========= RUNSHEET-LEVEL ITEMS ========= */
 
-// Get attached items
-async function refreshAttachedItems () {
+const itemSearch = ref('');
+const itemResults = ref([]);
+const searchingItems = ref(false);
+const itemListError = ref('');
+const attachedItems = ref([]);
+
+async function refreshAttachedItems() {
   if (!rs.value || !rs.value._id) return;
   try {
     const data = await api.get(`/tenant/runsheets/${rs.value._id}/items`);
@@ -1865,11 +2288,12 @@ async function refreshAttachedItems () {
     attachedItems.value = arr;
     rs.value.items = arr;
   } catch (e) {
-    attachedItems.value = Array.isArray(rs.value && rs.value.items) ? rs.value.items : [];
+    attachedItems.value = Array.isArray(rs.value && rs.value.items)
+      ? rs.value.items
+      : [];
   }
 }
 
-// Search catalog items
 async function searchItems() {
   itemListError.value = '';
   searchingItems.value = true;
@@ -1884,13 +2308,15 @@ async function searchItems() {
   }
 }
 
-// Attach an existing item to the runsheet
 async function addItemToRunsheet(itemOrId, qty = 1) {
   const id = rs.value && rs.value._id;
   const itemId = typeof itemOrId === 'string' ? itemOrId : itemOrId && itemOrId._id;
   if (!id || !itemId) return;
   try {
-    const resp = await api.post(`/tenant/runsheets/${id}/items`, { itemId, quantity: qty || 1 });
+    const resp = await api.post(`/tenant/runsheets/${id}/items`, {
+      itemId,
+      quantity: qty || 1
+    });
     if (Array.isArray(resp)) {
       attachedItems.value = resp;
       rs.value.items = resp;
@@ -1906,12 +2332,10 @@ async function addItemToRunsheet(itemOrId, qty = 1) {
   }
 }
 
-// Keep template calls working: "addItemToStop(stopId, it)" now attaches to RUNSHEET
 async function addItemToStop(_stopId, it) {
   await addItemToRunsheet(it, 1);
 }
 
-// Remove an attached item
 async function removeAttachedItem(itemId) {
   const id = rs.value && rs.value._id;
   if (!id || !itemId) return;
@@ -1932,35 +2356,6 @@ async function removeAttachedItem(itemId) {
   }
 }
 
-// Create a new Item (with image) and attach it to the runsheet
-const newItem = ref({ name: '', description: '', qty: 1, file: null, preview: '' });
-const creatingItem    = ref(false);
-const createItemError = ref('');
-function onNewItemImage(e) {
-  const f = e.target && e.target.files && e.target.files[0] || null;
-  newItem.value.file = f;
-  newItem.value.preview = f ? URL.createObjectURL(f) : '';
-}
-async function createAndAddItemToStop(_stopId_ignored) {
-  createItemError.value = '';
-  if (!newItem.value.name.trim()) { createItemError.value = 'Name is required'; return; }
-  creatingItem.value = true;
-  try {
-    const fd = new FormData();
-    fd.append('name', newItem.value.name.trim());
-    if (newItem.value.description && newItem.value.description.trim()) fd.append('description', newItem.value.description.trim());
-    if (newItem.value.file) fd.append('image', newItem.value.file);
-
-    const created = await api.post('/tenant/items', fd);
-    await addItemToRunsheet(created._id, newItem.value.qty || 1);
-    itemResults.value.unshift(created);
-    newItem.value = { name: '', description: '', qty: 1, file: null, preview: '' };
-  } catch (e) {
-    createItemError.value = e?.response?.data?.error || 'Failed to create item';
-  } finally { creatingItem.value = false; }
-}
-
-// Template might still offer "run item photos" per stop; now it’s N/A
 const removeRunItem = async (_stopId, _idx) => {
   alert('Run-item rows are now runsheet-level. Remove from the “Attached Items” list instead.');
 };
@@ -1969,48 +2364,73 @@ const uploadRunItemPhotos = async (_stopId, _idx, e) => {
   alert('Per-stop item photos are no longer supported. Add images to the Item itself.');
 };
 
-/* ============================ Assign to driver ============================ */
-const userSearch = ref('');
-const userResults = ref([]);
-const searchUsers = async () => {
-  try { userResults.value = await api.get('/tenant/members', { q: userSearch.value }); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to search users'; }
-};
-const assign = async (u) => {
-  try { rs.value = await api.post(`/tenant/runsheets/${rs.value._id}/assign`, { userId: u._id }); stamp(); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to assign'; }
+/* ============================ Destination (Place) ============================ */
+
+const setTakeTo = async (place) => {
+  try {
+    rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, {
+      takeTo: place._id || place
+    });
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to set destination';
+  }
 };
 
-/* ============================ Destination (Place) ============================ */
-const setTakeTo = async (place) => {
-  try { rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { takeTo: place._id || place }); stamp(); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to set destination'; }
-};
 const clearTakeTo = async () => {
-  try { rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { takeTo: null }); stamp(); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to clear destination'; }
+  try {
+    rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { takeTo: null });
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to clear destination';
+  }
 };
 
 /* ============================ Sets ============================ */
+
 const setSearch = ref('');
 const setResults = ref([]);
+
 const searchSets = async () => {
-  try { setResults.value = await api.get('/tenant/sets', setSearch.value ? { q: setSearch.value } : undefined); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to search sets'; }
+  try {
+    setResults.value = await api.get(
+      '/tenant/sets',
+      setSearch.value ? { q: setSearch.value } : undefined
+    );
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to search sets';
+  }
 };
+
 const chooseSet = async (s) => {
-  try { rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { set: s._id }); rs.value.set = s; stamp(); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to link set'; }
+  try {
+    rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { set: s._id });
+    rs.value.set = s;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to link set';
+  }
 };
+
 const clearSet = async () => {
-  try { rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { set: null }); rs.value.set = null; stamp(); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to clear set'; }
+  try {
+    rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { set: null });
+    rs.value.set = null;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to clear set';
+  }
 };
+
 const currentSetLabel = computed(() => {
-  const v = rs.value && rs.value.set; if (!v) return ''; if (typeof v === 'string') return `#${v}`; return `${v.number} — ${v.name}`;
+  const v = rs.value && rs.value.set;
+  if (!v) return '';
+  if (typeof v === 'string') return `#${v}`;
+  return `${v.number} — ${v.name}`;
 });
 
 /* ============================ Supplier (separate) ============================ */
+
 const selectedSupplier = ref(null);
 const searching = ref(false);
 const listError = ref('');
@@ -2018,31 +2438,73 @@ const suppliers = ref([]);
 const search = ref('');
 const creating = ref(false);
 const createError = ref('');
-const createForm = ref({ name: '', address: '', phone: '', contactName: '', hours: '' });
+const createForm = ref({
+  name: '',
+  address: '',
+  phone: '',
+  contactName: '',
+  hours: ''
+});
 
 let searchTimer;
-function debouncedFetchSuppliers(delay = 300) { clearTimeout(searchTimer); searchTimer = setTimeout(fetchSuppliers, delay); }
-async function fetchSuppliers() {
-  listError.value = ''; searching.value = true; suppliers.value = [];
-  try { const q = (search.value || '').trim(); suppliers.value = await api.get('/tenant/suppliers', { q }); }
-  catch (e) { listError.value = e?.response?.data?.error || 'Failed to load suppliers'; }
-  finally { searching.value = false; }
+function debouncedFetchSuppliers(delay = 300) {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(fetchSuppliers, delay);
 }
+
+async function fetchSuppliers() {
+  listError.value = '';
+  searching.value = true;
+  suppliers.value = [];
+  try {
+    const q = (search.value || '').trim();
+    suppliers.value = await api.get('/tenant/suppliers', { q });
+  } catch (e) {
+    listError.value = e?.response?.data?.error || 'Failed to load suppliers';
+  } finally {
+    searching.value = false;
+  }
+}
+
 async function persistSupplier(idOrNull) {
   if (!rs.value || !rs.value._id) return;
   saving.value = true;
-  try { rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, { supplier: idOrNull }); }
-  finally { saving.value = false; }
+  try {
+    rs.value = await api.patch(`/tenant/runsheets/${rs.value._id}`, {
+      supplier: idOrNull
+    });
+  } finally {
+    saving.value = false;
+  }
 }
+
 async function chooseSupplier(s) {
-  try { await persistSupplier(s._id); selectedSupplier.value = s; stamp(); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to set supplier'; }
+  try {
+    await persistSupplier(s._id);
+    selectedSupplier.value = s;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to set supplier';
+  }
 }
+
 async function clearSupplier() {
-  try { await persistSupplier(null); selectedSupplier.value = null; stamp(); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to clear supplier'; }
+  try {
+    await persistSupplier(null);
+    selectedSupplier.value = null;
+    stamp();
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to clear supplier';
+  }
 }
-function startChangeSupplier() { selectedSupplier.value = null; suppliers.value = []; search.value = ''; listError.value = ''; }
+
+function startChangeSupplier() {
+  selectedSupplier.value = null;
+  suppliers.value = [];
+  search.value = '';
+  listError.value = '';
+}
+
 async function createSupplier() {
   createError.value = '';
   const body = {
@@ -2052,7 +2514,10 @@ async function createSupplier() {
     contactName: (createForm.value.contactName || '').trim() || undefined,
     hours: (createForm.value.hours || '').trim() || undefined,
   };
-  if (!body.name || !body.address) { createError.value = 'Name and address are required.'; return; }
+  if (!body.name || !body.address) {
+    createError.value = 'Name and address are required.';
+    return;
+  }
   creating.value = true;
   try {
     const s = await api.post('/tenant/suppliers', body);
@@ -2062,125 +2527,47 @@ async function createSupplier() {
     stamp();
   } catch (e) {
     createError.value = e?.response?.data?.error || 'Failed to create supplier';
-  } finally { creating.value = false; }
-}
-
-/* ============================ Misc ============================ */
-const mapsUrl = (lat, lng) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-// Prefer route param, then tenant store, then a safe default
-const slug = computed(() => route.params.slug ?? tenant.slug ?? 'demo')
-
-// Used by the Back to list button
-function goToRunsheets() {
-  if (router.hasRoute('runsheets')) {
-    router.push({ name: 'runsheets', params: { slug: slug.value } })
-  } else {
-    // Fallback if you don’t have a named route
-    router.push(`/${slug.value}/runsheets`)
+  } finally {
+    creating.value = false;
   }
 }
+
+/* ============================ Misc / nav ============================ */
+
+const goToRunsheets = () => {
+  router.push('/runsheets');
+};
+
 const goToRunsheetView = () => {
-  const id = rs.value && rs.value._id; if (!id) return;
-  router.push({ name: 'runsheet-view', params: { id } })
-    .catch(() => router.push(`/runsheets/${id}`))
-    .catch(() => {});
+  if (!rs.value || !rs.value._id) return;
+  router.push(`/runsheets/${rs.value._id}`);
 };
 
-/* ---------------- Pickup signature handlers ---------------- */
-const pdSigStart = (e) => {
-  if (!pdSigCtx) return;
-  pdSigDrawing = true;
-  const { x, y } = getCanvasPos(pdSigCanvas, e);
-  pdSigLastX = x;
-  pdSigLastY = y;
-};
-const pdSigMove = (e) => {
-  if (!pdSigDrawing || !pdSigCtx) return;
-  const { x, y } = getCanvasPos(pdSigCanvas, e);
-  pdSigCtx.beginPath();
-  pdSigCtx.moveTo(pdSigLastX, pdSigLastY);
-  pdSigCtx.lineTo(x, y);
-  pdSigCtx.stroke();
-  pdSigLastX = x;
-  pdSigLastY = y;
-};
-const pdSigEnd = () => { pdSigDrawing = false; };
-const pdSigClear = () => {
-  if (pdSigCtx && pdSigCanvas.value) {
-    pdSigCtx.clearRect(0, 0, pdSigCanvas.value.width, pdSigCanvas.value.height);
-  }
-};
-const savePdSignature = async () => {
-  if (!rs.value || !rs.value._id || !pdSigCanvas.value) return;
-  pdSigSaving.value = true;
+const destroy = async () => {
+  if (!rs.value || !rs.value._id) return;
+  if (!confirm('Delete this runsheet? This cannot be undone.')) return;
   try {
-    const dataUrl = pdSigCanvas.value.toDataURL('image/png');
-    rs.value.pdSignatureData = dataUrl;
-    await api.patch(`/tenant/runsheets/${rs.value._id}`, { pdSignatureData: dataUrl });
-    stamp();
-  } finally {
-    pdSigSaving.value = false;
+    await api.del(`/tenant/runsheets/${rs.value._id}`);
+    router.push('/runsheets');
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to delete runsheet';
   }
 };
 
-/* ---------------- Return signature handlers ---------------- */
-const rdSigStart = (e) => {
-  if (!rdSigCtx) return;
-  rdSigDrawing = true;
-  const { x, y } = getCanvasPos(rdSigCanvas, e);
-  rdSigLastX = x;
-  rdSigLastY = y;
-};
-const rdSigMove = (e) => {
-  if (!rdSigDrawing || !rdSigCtx) return;
-  const { x, y } = getCanvasPos(rdSigCanvas, e);
-  rdSigCtx.beginPath();
-  rdSigCtx.moveTo(rdSigLastX, rdSigLastY);
-  rdSigCtx.lineTo(x, y);
-  rdSigCtx.stroke();
-  rdSigLastX = x;
-  rdSigLastY = y;
-};
-const rdSigEnd = () => { rdSigDrawing = false; };
-const rdSigClear = () => {
-  if (rdSigCtx && rdSigCanvas.value) {
-    rdSigCtx.clearRect(0, 0, rdSigCanvas.value.width, rdSigCanvas.value.height);
-  }
-};
-const saveRdSignature = async () => {
-  if (!rs.value || !rs.value._id || !rdSigCanvas.value) return;
-  rdSigSaving.value = true;
-  try {
-    const dataUrl = rdSigCanvas.value.toDataURL('image/png');
-    rs.value.rdSignatureData = dataUrl;
-    await api.patch(`/tenant/runsheets/${rs.value._id}`, { rdSignatureData: dataUrl });
-    stamp();
-  } finally {
-    rdSigSaving.value = false;
-  }
-};
+/* ============================ Lifecycle ============================ */
 
 onMounted(async () => {
-  loading.value = true;
-  try {
-    try { me.value = await auth.fetchMe(); } catch (e) {}
-    await Promise.all([loadPeople(), searchSets(), load()]);
-    if (rs.value && rs.value.supplier) {
-      selectedSupplier.value = typeof rs.value.supplier === 'object'
-        ? rs.value.supplier
-        : await api.get(`/tenant/suppliers/${rs.value.supplier}`).catch(() => null);
-    }
-  } catch (e) {
-    error.value = e?.response?.data?.error || 'Failed to initialize runsheet';
-  } finally {
-  loading.value = false;
-  setTimeout(() => {
-    initSignatureCanvas();        // QC
-    initPickupSignatureCanvas();  // Pickup
-    initReturnSignatureCanvas();  // Return
-  }, 0);
-}})
+  await loadPeople();
+  await load();
+  initSignatureCanvas();
+  initPickupSignatureCanvas();
+  initReturnSignatureCanvas();
+});
 </script>
+
+
+
+
 
 
 

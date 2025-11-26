@@ -196,83 +196,61 @@ export async function requireOwner(req, res, next) {
 
 router.get('/members', async (req, res) => {
   try {
-    // Same guard as before: must have user + x-production-id
+    // Must have user + x-production-id (your existing guard)
     if (!requireContext(req, res)) return;
 
-    // Get production id from header
     const productionId = getProductionId(req);
     if (!productionId) {
       return res.status(400).json({ error: 'Missing production id' });
     }
 
-    // Optional search query (?q=foo)
     const { q } = req.query || {};
     const needle = q && String(q).trim().toLowerCase();
 
-    // Load production with members only (no extra populate)
+    // Load ONLY the members array (authoritative for tenant users)
     const prod = await Production.findById(productionId)
-      .select('members ownerUserId owner')
+      .select('members')
       .lean();
 
     if (!prod) {
       return res.status(404).json({ error: 'Production not found' });
     }
 
-    // ----- Owner (from User collection) -----
-    let owner = null;
-    const ownerId = toId(prod.ownerUserId || prod.owner);
-
-    if (ownerId) {
-      const u = await User.findById(ownerId)
-        .select('_id email name')
-        .lean();
-      if (u) {
-        owner = {
-          id: String(u._id),
-          email: u.email,
-          name: u.name || '',
-        };
-      }
-    }
-
-    // ----- Members from Production.members -----
-    // NOTE: this mirrors your working route:
-    //   _id      -> member subdocument id
-    //   user     -> backing User ObjectId (may be null)
-    //   email    -> member email
-    //   role     -> member role
-    //   siteAuthorized, addedAt
-
+    // Normalize members into a simple array for the frontend
     let members = (prod.members || []).map((m) => ({
-      _id: m._id || m.id || null,
-      user: m.user || null,
-      email: m.email || '',
-      role: m.role || 'user',
+      _id:          String(m._id),              // member subdoc id
+      user:         m.user || null,            // backing User id (optional, may be null)
+      email:        (m.email || '').trim(),
+      role:         m.role || 'editor',
       siteAuthorized: !!m.siteAuthorized,
-      addedAt: m.addedAt || null,
+      addedAt:      m.addedAt || null,
+      // You can add more fields here later if needed (e.g. displayName)
     }));
 
-    // Optional filter by email substring
+    // Optional filter by substring in email
     if (needle) {
       members = members.filter((m) =>
         (m.email || '').toLowerCase().includes(needle)
       );
     }
 
-    // Sort alphabetically by email
+    // Sort by email for a stable list
     members.sort((a, b) =>
       (a.email || '').localeCompare(b.email || '')
     );
 
-    return res.json({ owner, members });
+    // 🔥 Final response is just the array (what your Vue code expects)
+    return res.json(members);
   } catch (e) {
     const code = e.status || 500;
     if (code >= 500) {
-      console.error('[GET /tenant/tenantauth/members]', e);
+      console.error('[GET /tenant/members]', e);
     }
     res.status(code).json({ error: e.message || 'Failed to list members' });
   }
 });
+
+
 
 
 /**
