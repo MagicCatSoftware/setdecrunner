@@ -65,25 +65,7 @@
         </p>
       </section>
 
-      <!-- Destination (Take To) -->
-      <section class="panel">
-        <div class="row">
-          <h3 class="subtitle">Destination (Take To)</h3>
-          <div class="muted">Choose the final drop-off location from your saved Places.</div>
-        </div>
-
-        <div class="row row--tight">
-          <div class="field w-full">
-            <div class="label">Select Place</div>
-            <PlaceSearch @select="setTakeTo" />
-            <p v-if="rs.takeTo" class="muted mt-1">
-              Selected: <strong>{{ rs.takeTo?.name }}</strong>
-              <span v-if="rs.takeTo?.address"> — {{ rs.takeTo.address }}</span>
-              <button type="button" class="chip chip--x" @click.stop.prevent="clearTakeTo">×</button>
-            </p>
-          </div>
-        </div>
-      </section>
+     
 
       <!-- Set -->
       <section class="panel">
@@ -539,152 +521,7 @@
   </div>
 </section>
 
-      <!-- Stops -->
-      <section class="panel">
-        <div class="row">
-          <h3 class="subtitle">Stops</h3>
-          <div class="muted">Use Add below, then Move Up/Down to reorder</div>
-        </div>
 
-        <PlaceSearch @select="addStop" />
-
-        <div v-if="!rs.stops?.length" class="empty muted">
-          No stops yet. Use the place search above to add one.
-        </div>
-
-        <div v-for="(s, sIdx) in rs.stops" :key="s._id || sIdx" class="stop card">
-          <div class="stop__head">
-            <div class="stop__meta">
-              <div class="stop__title">{{ s.title || s.place?.name || 'Stop' }}</div>
-              <div class="stop__addr" v-if="s.place?.address">{{ s.place.address }}</div>
-              <a
-                v-if="s.place?.lat && s.place?.lng"
-                :href="mapsUrl(s.place.lat, s.place.lng)"
-                target="_blank" rel="noopener"
-                class="link link--small"
-                @click.stop
-              >Open in Google Maps</a>
-            </div>
-            <div class="stop__actions">
-              <button type="button" class="btn" @click.stop.prevent="moveStopUp(sIdx)" :disabled="sIdx===0">↑ Move Up</button>
-              <button type="button" class="btn" @click.stop.prevent="moveStopDown(sIdx)" :disabled="sIdx===rs.stops.length-1">↓ Move Down</button>
-              <button type="button" class="btn btn--ghost" @click.stop.prevent="removeStop(s._id)">Remove Stop</button>
-            </div>
-          </div>
-
-          <textarea
-            v-model="s.instructions"
-            class="textarea"
-            rows="2"
-            placeholder="Driver instructions for this stop (dock access, hours, contact)…"
-            @change="saveStop(s)"
-          ></textarea>
-
-          <!-- Items at stop -->
-          <!-- Items at stop -->
-<div class="stop__items">
-  <!-- Search existing -->
-  <div class="row row--tight">
-    <h4 class="mini-title">Items at this stop</h4>
-    <input v-model="itemSearch" placeholder="Search items…" class="input" />
-    <button type="button" class="btn" @click.stop.prevent="searchItems" :disabled="searchingItems">
-      {{ searchingItems ? 'Searching…' : 'Search' }}
-    </button>
-    <span v-if="itemListError" class="error">{{ itemListError }}</span>
-  </div>
-
-  <div class="pillbar">
-    <button
-      v-for="it in itemResults"
-      :key="it._id"
-      class="pill"
-      type="button"
-      @click.stop.prevent="addItemToStop(s._id, it._id)"
-    >
-      + {{ it.name }}
-    </button>
-  </div>
-
-  <!-- Create new item (with image) -->
-  <details class="mt-1">
-    <summary class="link">Create & add a new item</summary>
-    <div class="row row--wrap" style="gap:.75rem;margin-top:.5rem;">
-      <div class="field">
-        <label class="label">Name *</label>
-        <input v-model="newItem.name" class="input" placeholder="eg. Brass Lamp" />
-      </div>
-
-      <div class="field" style="min-width:280px;flex:1;">
-        <label class="label">Description (optional)</label>
-        <input v-model="newItem.description" class="input" placeholder="Short description" />
-      </div>
-
-      <div class="field">
-        <label class="label">Quantity</label>
-        <input type="number" min="1" v-model.number="newItem.qty" class="input input--qty" />
-      </div>
-
-      <div class="field">
-        <label class="label">Image</label>
-        <input type="file" accept="image/*" @change="onNewItemImage($event)" />
-        <div v-if="newItem.preview" class="thumbs thumbs--small" style="margin-top:6px;">
-          <img :src="newItem.preview" class="thumb__img thumb__img--sm" />
-        </div>
-      </div>
-
-      <div class="field" style="align-self:flex-end;">
-        <button
-          type="button"
-          class="btn btn--primary"
-          :disabled="creatingItem || !newItem.name.trim()"
-          @click.stop.prevent="createAndAddItem(s._id)"
-        >
-          {{ creatingItem ? 'Creating…' : 'Create & Add' }}
-        </button>
-        <span v-if="createItemError" class="error" style="margin-left:.5rem;">{{ createItemError }}</span>
-      </div>
-    </div>
-  </details>
-
-  <!-- Current items at this stop -->
-  <div class="items">
-    <div v-for="(ri, idx) in s.items" :key="idx" class="item card">
-      <div class="item__row">
-        <div class="item__name">{{ ri.name }}</div>
-        <div class="qty">
-          <label class="muted">Qty</label>
-          <input
-            type="number"
-            v-model.number="ri.quantity"
-            min="0"
-            class="input input--qty"
-            @change="save"
-          />
-          <button type="button" class="btn btn--danger" @click.stop.prevent="removeRunItem(s._id, idx)">Remove</button>
-        </div>
-      </div>
-
-      <textarea v-model="ri.notes" class="textarea" rows="2" placeholder="Notes…" @change="save"></textarea>
-
-      <div class="row row--tight">
-        <span class="muted">Photos</span>
-        <input type="file" multiple @change="(e)=>uploadRunItemPhotos(s._id, idx, e)" />
-      </div>
-
-      <div class="thumbs thumbs--small">
-        <img
-          v-for="p in ri.photos || []"
-          :key="p"
-          :src="imageUrl(p)"
-          class="thumb__img thumb__img--sm"
-        />
-      </div>
-    </div>
-  </div>
-</div>
-
-        </div>
-      </section>
 
       <!-- Pickup/Delivering -->
 <section class="panel">
@@ -769,19 +606,28 @@
 </div>
 
 <div class="row row--tight">
-  <input v-model="cbSearch" placeholder="Search users…" class="input" />
-  <button type="button" class="btn" @click.stop.prevent="searchCompletedUsers">Search</button>
+  <input v-model="pdSearch" placeholder="Search users…" class="input" />
   <button
-    v-if="rs.pdCompletedBy"  
+    type="button"
+    class="btn"
+    @click.stop.prevent="searchPdUsers"
+    :disabled="pdSearching"
+  >
+    {{ pdSearching ? 'Searching…' : 'Search' }}
+  </button>
+  <button
+    v-if="rs.pdCompletedBy"
     type="button"
     class="btn btn--ghost"
     @click.stop.prevent="clearCompletedBy"
-  >Unset</button>
+  >
+    Unset
+  </button>
 </div>
 
 <div class="pillbar">
   <button
-    v-for="u in cbResults"
+    v-for="u in pdResults"
     :key="u._id"
     class="pill"
     type="button"
@@ -789,6 +635,44 @@
   >
     Use {{ u.name || u.email }}
   </button>
+</div>
+
+
+<!-- Pickup Signature -->
+<div class="field">
+  <div class="label">Pickup Signature</div>
+
+  <div style="border:1px solid #ddd;border-radius:8px;padding:8px;">
+    <canvas
+      ref="pdSigCanvas"
+      class="sigpad"
+      style="width:100%;height:180px;touch-action:none;display:block;cursor:crosshair;"
+      @mousedown="pdSigStart"
+      @mousemove="pdSigMove"
+      @mouseup="pdSigEnd"
+      @mouseleave="pdSigEnd"
+      @touchstart.prevent="pdSigStart"
+      @touchmove.prevent="pdSigMove"
+      @touchend.prevent="pdSigEnd"
+    ></canvas>
+
+    <div class="row row--tight" style="margin-top:8px;">
+      <button type="button" class="btn btn--ghost" @click="pdSigClear">Clear</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn--primary" @click="savePdSignature" :disabled="pdSigSaving">
+        {{ pdSigSaving ? 'Saving…' : 'Save Pickup Signature' }}
+      </button>
+    </div>
+  </div>
+
+  <div v-if="rs.pdSignatureData" class="mt-2">
+    <div class="muted">Saved pickup signature:</div>
+    <img
+      :src="rs.pdSignatureData"
+      alt="Pickup signature"
+      style="max-width:320px;max-height:120px;display:block;"
+    />
+  </div>
 </div>
 
 <div class="field">
@@ -875,35 +759,85 @@
   </div>
 
   <div class="row row--tight">
-    <input v-model="cbSearch" placeholder="Search users…" class="input" @input="debouncedSearchCompletedUsers" />
-<button type="button" class="btn" @click.stop.prevent="searchCompletedUsers" :disabled="cbSearching">
-  {{ cbSearching ? 'Searching…' : 'Search' }}
-</button>
-    <button
-      v-if="rs.rdCompletedBy"
-      type="button"
-      class="btn btn--ghost"
-      @click.stop.prevent="clearRdCompletedBy"
-    >Unset</button>
-  </div>
+  <input
+    v-model="rdSearch"
+    placeholder="Search users…"
+    class="input"
+    @input="debouncedSearchRdUsers"
+  />
+  <button
+    type="button"
+    class="btn"
+    @click.stop.prevent="searchRdUsers"
+    :disabled="rdSearching"
+  >
+    {{ rdSearching ? 'Searching…' : 'Search' }}
+  </button>
+  <button
+    v-if="rs.rdCompletedBy"
+    type="button"
+    class="btn btn--ghost"
+    @click.stop.prevent="clearRdCompletedBy"
+  >
+    Unset
+  </button>
+</div>
 
-  <div class="pillbar">
-    <button
-      v-for="u in cbResults"
-      :key="u._id"
-      class="pill"
-      type="button"
-      @click.stop.prevent="selectRdCompletedBy(u)"
-    >
-      Use {{ u.name || u.email }}
-    </button>
-  </div>
+<div class="pillbar">
+  <button
+    v-for="u in rdResults"
+    :key="u._id"
+    class="pill"
+    type="button"
+    @click.stop.prevent="selectRdCompletedBy(u)"
+  >
+    Use {{ u.name || u.email }}
+  </button>
+</div>
 
   <!-- Completed On -->
   <div class="field">
     <label class="label" for="rd-finished">Completed On</label>
     <input id="rd-finished" type="date" v-model="rdCompletedOnStr" @change="saveReturnDropoff" />
   </div>
+
+<!-- Return Signature -->
+<div class="field">
+  <div class="label">Return Signature</div>
+
+  <div style="border:1px solid #ddd;border-radius:8px;padding:8px;">
+    <canvas
+      ref="rdSigCanvas"
+      class="sigpad"
+      style="width:100%;height:180px;touch-action:none;display:block;cursor:crosshair;"
+      @mousedown="rdSigStart"
+      @mousemove="rdSigMove"
+      @mouseup="rdSigEnd"
+      @mouseleave="rdSigEnd"
+      @touchstart.prevent="rdSigStart"
+      @touchmove.prevent="rdSigMove"
+      @touchend.prevent="rdSigEnd"
+    ></canvas>
+
+    <div class="row row--tight" style="margin-top:8px;">
+      <button type="button" class="btn btn--ghost" @click="rdSigClear">Clear</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn--primary" @click="saveRdSignature" :disabled="rdSigSaving">
+        {{ rdSigSaving ? 'Saving…' : 'Save Return Signature' }}
+      </button>
+    </div>
+  </div>
+
+  <div v-if="rs.rdSignatureData" class="mt-2">
+    <div class="muted">Saved return signature:</div>
+    <img
+      :src="rs.rdSignatureData"
+      alt="Return signature"
+      style="max-width:320px;max-height:120px;display:block;"
+    />
+  </div>
+</div>
+
 </section>
 
 <!-- Items Returned + Signature -->
@@ -1021,6 +955,23 @@ let sigLastX = 0;
 let sigLastY = 0;
 const sigSaving = ref(false);
 
+const pdSigCanvas = ref(null);
+const rdSigCanvas = ref(null);
+
+let pdSigCtx = null;
+let rdSigCtx = null;
+
+let pdSigDrawing = false;
+let rdSigDrawing = false;
+
+let pdSigLastX = 0;
+let pdSigLastY = 0;
+let rdSigLastX = 0;
+let rdSigLastY = 0;
+
+const pdSigSaving = ref(false);
+const rdSigSaving = ref(false);
+
 const rs = ref({
   title: '',
   status: 'draft',
@@ -1118,6 +1069,23 @@ const saveContactSelection = async () => {
   }
 };
 
+const getCanvasPos = (canvasRef, e) => {
+  const el = canvasRef.value;
+  if (!el) return { x: 0, y: 0 };
+
+  const rect = el.getBoundingClientRect();
+  const touch = e.touches && e.touches[0];
+
+  const clientX = touch ? touch.clientX : e.clientX;
+  const clientY = touch ? touch.clientY : e.clientY;
+
+  const x = (clientX - rect.left) * (el.width / rect.width);
+  const y = (clientY - rect.top) * (el.height / rect.height);
+
+  return { x, y };
+};
+
+
 /* ====================== Post-Run Destination helpers ====================== */
 // Label for the selected postPlace (when address_below)
 const postPlaceLabel = computed(() => {
@@ -1128,7 +1096,6 @@ const postPlaceLabel = computed(() => {
   return extra ? `${p.name} — ${extra}` : p.name;
 });
 
-// Toggle the one-of checkboxes (radio-like behavior)
 async function togglePost(key, ev) {
   if (!rs.value?._id) return;
   const willCheck = !!ev?.target?.checked;
@@ -1139,22 +1106,47 @@ async function togglePost(key, ev) {
   // Update local model first
   rs.value.postLocation = next;
 
-  // If switching away from 'address_below', clear address/place
+  // Keep checkbox visually in sync with our local decision
+  if (ev?.target) ev.target.checked = next === key;
+
+  // If switching AWAY from address_below, clear address/place and PATCH immediately
   if (next !== 'address_below') {
     rs.value.postPlace = null;
     rs.value.postAddress = '';
+    try {
+      await api.patch(`/tenant/runsheets/${rs.value._id}`, {
+        postLocation: next,
+        postAddress: '',
+        postPlace: null,
+      });
+      stamp();
+    } catch (e) {
+      error.value = e?.response?.data?.error || 'Failed to save post-run destination';
+    }
+    return;
   }
 
-  // Keep the clicked checkbox visually in sync
-  if (ev?.target) ev.target.checked = next === key;
+  // If we *are* switching TO address_below, only PATCH if we ALREADY have addr or place.
+  const hasAddress =
+    !!(rs.value.postAddress && rs.value.postAddress.toString().trim());
+  const hasPlace =
+    !!(rs.value.postPlace && (rs.value.postPlace._id || rs.value.postPlace));
 
+  if (!hasAddress && !hasPlace) {
+    // Just let the UI show the checkbox and textarea/PlaceSearch;
+    // backend will be updated later via choosePostPlace() or savePostLocation().
+    return;
+  }
+
+  // We already have enough info, so it's safe to persist the address_below state now.
   try {
     await api.patch(`/tenant/runsheets/${rs.value._id}`, {
-      postLocation: next,
-      postAddress: next === 'address_below' ? (rs.value.postAddress || '') : '',
-      postPlace: next === 'address_below'
-        ? (rs.value.postPlace?._id ?? rs.value.postPlace ?? null)
-        : null,
+      postLocation: 'address_below',
+      postAddress: rs.value.postAddress || '',
+      postPlace:
+        (rs.value.postPlace && rs.value.postPlace._id) ??
+        rs.value.postPlace ??
+        null,
     });
     stamp();
   } catch (e) {
@@ -1341,21 +1333,92 @@ const onPurchaseTypeChanged = async (ev) => {
   }
 };
 
-/* =========== Users search (shared by PD + RD computed below) =========== */
-const cbSearch = ref('');
-const cbResults = ref([]);
-const searchCompletedUsers = async () => {
-  try { cbResults.value = await api.get('/tenant/members/',); }
-  catch (e) { error.value = e?.response?.data?.error || 'Failed to search users'; }
+/* =========== Users search: PD + RD have independent state =========== */
+
+// Pickup/Delivering
+const pdSearch    = ref('');
+const pdResults   = ref([]);
+const pdSearching = ref(false);
+
+// Return/Drop Off
+const rdSearch    = ref('');
+const rdResults   = ref([]);
+const rdSearching = ref(false);
+
+// --- Pickup search ---
+const searchPdUsers = async () => {
+  pdSearching.value = true;
+  try {
+    pdResults.value = await api.get('/tenant/members', {
+      q: (pdSearch.value || '').trim()
+    });
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to search users';
+    pdResults.value = [];
+  } finally {
+    pdSearching.value = false;
+  }
 };
-const selectCompletedBy = async (u) => { if (!rs.value) return; rs.value.pdCompletedBy = u; await savePickupDelivering(); };
-const clearCompletedBy = async () => { if (!rs.value) return; rs.value.pdCompletedBy = null; await savePickupDelivering(); };
+
+const selectCompletedBy = async (u) => {
+  if (!rs.value) return;
+  rs.value.pdCompletedBy = u;
+  await savePickupDelivering();
+};
+
+const clearCompletedBy = async () => {
+  if (!rs.value) return;
+  rs.value.pdCompletedBy = null;
+  await savePickupDelivering();
+};
+
 const completedByLabel = computed(() => {
   const v = rs.value && rs.value.pdCompletedBy;
   if (!v) return '';
-  if (typeof v === 'string') { const hit = cbResults.value.find(x => x._id === v); return hit ? (hit.name || hit.email || hit._id) : `#${v}`; }
+  if (typeof v === 'string') {
+    const hit = (pdResults.value || []).find(x => x._id === v);
+    return hit ? (hit.name || hit.email || hit._id) : `#${v}`;
+  }
   return v.name || v.email || v._id || '';
 });
+
+// --- Return search (with debounce) ---
+let rdSearchTimer = null;
+function debouncedSearchRdUsers() {
+  clearTimeout(rdSearchTimer);
+  rdSearchTimer = setTimeout(searchRdUsers, 300);
+}
+
+const searchRdUsers = async () => {
+  rdSearching.value = true;
+  try {
+    rdResults.value = await api.get('/tenant/members', {
+      q: (rdSearch.value || '').trim()
+    });
+  } catch (e) {
+    error.value = e?.response?.data?.error || 'Failed to search users';
+    rdResults.value = [];
+  } finally {
+    rdSearching.value = false;
+  }
+};
+
+const selectRdCompletedBy = async (u) => {
+  if (!rs.value) return;
+  rs.value.rdCompletedBy = u;
+  await saveReturnDropoff();
+};
+
+const rdCompletedByLabel = computed(() => {
+  const v = rs.value && rs.value.rdCompletedBy;
+  if (!v) return '';
+  if (typeof v === 'string') {
+    const hit = (rdResults.value || []).find(x => x._id === v);
+    return hit ? (hit.name || hit.email || hit._id) : `#${v}`;
+  }
+  return v.name || v.email || v._id || '';
+});
+
 
 /* ============================== Load ============================== */
 const hydratePostPlace = async () => {
@@ -1478,7 +1541,14 @@ const initSignatureCanvas = () => {
   sigCtx.strokeStyle = '#111';
 };
 let sigResizeTimer = null;
-window.addEventListener('resize', () => { clearTimeout(sigResizeTimer); sigResizeTimer = setTimeout(initSignatureCanvas, 150); });
+window.addEventListener('resize', () => {
+  clearTimeout(sigResizeTimer);
+  sigResizeTimer = setTimeout(() => {
+    initSignatureCanvas();        // QC
+    initPickupSignatureCanvas();  // Pickup
+    initReturnSignatureCanvas();  // Return
+  }, 150);
+});
 const saveSignature = async () => {
   if (!rs.value || !rs.value._id || !sigCanvas.value) return;
   sigSaving.value = true;
@@ -1492,6 +1562,41 @@ const saveSignature = async () => {
   } finally { sigSaving.value = false; }
 };
 
+const initPickupSignatureCanvas = () => {
+  if (!pdSigCanvas.value) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = pdSigCanvas.value.clientWidth || 600;
+  const cssH = pdSigCanvas.value.clientHeight || 180;
+
+  pdSigCanvas.value.width  = Math.round(cssW * dpr);
+  pdSigCanvas.value.height = Math.round(cssH * dpr);
+
+  pdSigCtx = pdSigCanvas.value.getContext('2d');
+  pdSigCtx.scale(dpr, dpr);
+  pdSigCtx.lineCap = 'round';
+  pdSigCtx.lineJoin = 'round';
+  pdSigCtx.lineWidth = 2;
+  pdSigCtx.strokeStyle = '#111';
+};
+
+const initReturnSignatureCanvas = () => {
+  if (!rdSigCanvas.value) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = rdSigCanvas.value.clientWidth || 600;
+  const cssH = rdSigCanvas.value.clientHeight || 180;
+
+  rdSigCanvas.value.width  = Math.round(cssW * dpr);
+  rdSigCanvas.value.height = Math.round(cssH * dpr);
+
+  rdSigCtx = rdSigCanvas.value.getContext('2d');
+  rdSigCtx.scale(dpr, dpr);
+  rdSigCtx.lineCap = 'round';
+  rdSigCtx.lineJoin = 'round';
+  rdSigCtx.lineWidth = 2;
+  rdSigCtx.strokeStyle = '#111';
+};
+
+
 /* ============================== Return / Drop Off ============================== */
 const rdDateStr = computed({
   get() { const d = rs.value && rs.value.rdDate && new Date(rs.value.rdDate); return d && !isNaN(d) ? d.toISOString().slice(0,10) : ''; },
@@ -1502,17 +1607,7 @@ const rdCompletedOnStr = computed({
   set(v) { if (rs.value) rs.value.rdCompletedOn = v ? new Date(v).toISOString() : null; }
 });
 const onToggleRdCheque = async (ev) => { if (!rs.value) return; rs.value.rdCheque = !!ev.target.checked; ev.target.checked = rs.value.rdCheque; await saveReturnDropoff(); };
-const selectRdCompletedBy = async (u) => { if (!rs.value) return; rs.value.rdCompletedBy = u; await saveReturnDropoff(); };
-const clearRdCompletedBy = async () => { if (!rs.value) return; rs.value.rdCompletedBy = null; await saveReturnDropoff(); };
-const rdCompletedByLabel = computed(() => {
-  const v = rs.value && rs.value.rdCompletedBy;
-  if (!v) return '';
-  if (typeof v === 'string') {
-    const hit = (cbResults.value || []).find(x => x._id === v);
-    return hit ? (hit.name || hit.email || hit._id) : `#${v}`;
-  }
-  return v.name || v.email || v._id || '';
-});
+
 const saveReturnDropoff = async () => {
   if (!rs.value || !rs.value._id) return;
   try {
@@ -1991,6 +2086,80 @@ const goToRunsheetView = () => {
     .catch(() => {});
 };
 
+/* ---------------- Pickup signature handlers ---------------- */
+const pdSigStart = (e) => {
+  if (!pdSigCtx) return;
+  pdSigDrawing = true;
+  const { x, y } = getCanvasPos(pdSigCanvas, e);
+  pdSigLastX = x;
+  pdSigLastY = y;
+};
+const pdSigMove = (e) => {
+  if (!pdSigDrawing || !pdSigCtx) return;
+  const { x, y } = getCanvasPos(pdSigCanvas, e);
+  pdSigCtx.beginPath();
+  pdSigCtx.moveTo(pdSigLastX, pdSigLastY);
+  pdSigCtx.lineTo(x, y);
+  pdSigCtx.stroke();
+  pdSigLastX = x;
+  pdSigLastY = y;
+};
+const pdSigEnd = () => { pdSigDrawing = false; };
+const pdSigClear = () => {
+  if (pdSigCtx && pdSigCanvas.value) {
+    pdSigCtx.clearRect(0, 0, pdSigCanvas.value.width, pdSigCanvas.value.height);
+  }
+};
+const savePdSignature = async () => {
+  if (!rs.value || !rs.value._id || !pdSigCanvas.value) return;
+  pdSigSaving.value = true;
+  try {
+    const dataUrl = pdSigCanvas.value.toDataURL('image/png');
+    rs.value.pdSignatureData = dataUrl;
+    await api.patch(`/tenant/runsheets/${rs.value._id}`, { pdSignatureData: dataUrl });
+    stamp();
+  } finally {
+    pdSigSaving.value = false;
+  }
+};
+
+/* ---------------- Return signature handlers ---------------- */
+const rdSigStart = (e) => {
+  if (!rdSigCtx) return;
+  rdSigDrawing = true;
+  const { x, y } = getCanvasPos(rdSigCanvas, e);
+  rdSigLastX = x;
+  rdSigLastY = y;
+};
+const rdSigMove = (e) => {
+  if (!rdSigDrawing || !rdSigCtx) return;
+  const { x, y } = getCanvasPos(rdSigCanvas, e);
+  rdSigCtx.beginPath();
+  rdSigCtx.moveTo(rdSigLastX, rdSigLastY);
+  rdSigCtx.lineTo(x, y);
+  rdSigCtx.stroke();
+  rdSigLastX = x;
+  rdSigLastY = y;
+};
+const rdSigEnd = () => { rdSigDrawing = false; };
+const rdSigClear = () => {
+  if (rdSigCtx && rdSigCanvas.value) {
+    rdSigCtx.clearRect(0, 0, rdSigCanvas.value.width, rdSigCanvas.value.height);
+  }
+};
+const saveRdSignature = async () => {
+  if (!rs.value || !rs.value._id || !rdSigCanvas.value) return;
+  rdSigSaving.value = true;
+  try {
+    const dataUrl = rdSigCanvas.value.toDataURL('image/png');
+    rs.value.rdSignatureData = dataUrl;
+    await api.patch(`/tenant/runsheets/${rs.value._id}`, { rdSignatureData: dataUrl });
+    stamp();
+  } finally {
+    rdSigSaving.value = false;
+  }
+};
+
 onMounted(async () => {
   loading.value = true;
   try {
@@ -2004,10 +2173,13 @@ onMounted(async () => {
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to initialize runsheet';
   } finally {
-    loading.value = false;
-    setTimeout(initSignatureCanvas, 0);
-  }
-});
+  loading.value = false;
+  setTimeout(() => {
+    initSignatureCanvas();        // QC
+    initPickupSignatureCanvas();  // Pickup
+    initReturnSignatureCanvas();  // Return
+  }, 0);
+}})
 </script>
 
 

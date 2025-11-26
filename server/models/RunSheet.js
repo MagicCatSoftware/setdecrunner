@@ -1,4 +1,4 @@
-// server/models/RunSheet.js
+// server/models/RunSheet.js 
 import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
@@ -84,7 +84,7 @@ const RunsheetSchema = new Schema({
   supplier: { type: Schema.Types.ObjectId, ref: 'Supplier', default: null },
 
   // Run
-  stops:  { type: [StopSchema],     default: [] },
+  stops:  { type: [StopSchema],      default: [] },
 
   // runsheet-level items (attached to runsheet, not a stop)
   items:  { type: [RunAttachSchema], default: [] },
@@ -139,6 +139,10 @@ const RunsheetSchema = new Schema({
   qcItemsGood:     { type: Boolean, default: null },
   qcSignatureData: { type: String, default: '' },
 
+  // NEW: separate signatures for pickup + return
+  pdSignatureData: { type: String, default: '' }, // Pickup signature image (data URL)
+  rdSignatureData: { type: String, default: '' }, // Return signature image (data URL)
+
   // Canonical list of Item IDs used anywhere on this runsheet
   itemsIndex: { type: [{ type: Schema.Types.ObjectId, ref: 'Item' }], default: [] },
 
@@ -147,9 +151,9 @@ const RunsheetSchema = new Schema({
 
   // OCR bucket
   ocr: {
-    latest:    { type: Schema.Types.Mixed, default: null },
-    history:   { type: [Schema.Types.Mixed], default: [] },
-    searchText:{ type: String, default: '' },
+    latest:     { type: Schema.Types.Mixed, default: null },
+    history:    { type: [Schema.Types.Mixed], default: [] },
+    searchText: { type: String, default: '' },
   },
 }, { timestamps: true });
 

@@ -304,6 +304,8 @@ router.post('/', async (req, res, next) => {
     // QC
     const qcItemsGood = boolish(b.qcItemsGood) ?? null;
 
+    
+
     console.log(req.user);
 
     const rs = await Runsheet.create({
@@ -358,6 +360,8 @@ router.post('/', async (req, res, next) => {
 
       qcItemsGood,
       qcSignatureData: b.qcSignatureData || '',
+      pdSignatureData: b.pdSignatureData || '',
+      rdSignatureData: b.rdSignatureData || '',
     });
 
     res.status(201).json(await loadFullScoped(rs._id, req.headers['x-production-id']));
@@ -547,6 +551,9 @@ router.patch('/:id', async (req, res, next) => {
     // QC
     if (b.qcItemsGood !== undefined)       update.qcItemsGood     = boolish(b.qcItemsGood) ?? null;
     if (b.qcSignatureData !== undefined)   update.qcSignatureData = String(b.qcSignatureData || '');
+
+ if (b.pdSignatureData !== undefined)   update.pdSignatureData = String(b.pdSignatureData || '');
+    if (b.rdSignatureData !== undefined)   update.rdSignatureData = String(b.rdSignatureData || '');
 
     // Current doc (scoped)
     const current = await Runsheet.findOne({ _id: req.params.id, productionId: req.headers['x-production-id'] });

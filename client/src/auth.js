@@ -78,7 +78,7 @@ async function resolveProductionIdBySlug(slug) {
  */
 async function bootstrapForSlug(slug) {
   // Resolve the production id first if missing or invalid
-  const productionId = await axios.get('https://www.set-dec.com/api/productions/by-slug/' + slug);
+  const productionId = await axios.get('https://set-dec.com/api/productions/by-slug/' + slug);
   
   if (!toId(productionId.data._id)) {
     await resolveProductionIdBySlug(slug);
