@@ -80,6 +80,9 @@ const RunsheetSchema = new Schema({
   photos:   { type: [String], default: [] },
   receipts: { type: [String], default: [] },
 
+  // ⭐ NEW: flag so we can filter handwritten runsheets
+  handwritten: { type: Boolean, default: false },
+
   // Supplier (optional explicit link)
   supplier: { type: Schema.Types.ObjectId, ref: 'Supplier', default: null },
 
@@ -202,6 +205,7 @@ RunsheetSchema.query.byProduction = function (prodId) {
 };
 
 export default mongoose.model('Runsheet', RunsheetSchema);
+
 
 
 

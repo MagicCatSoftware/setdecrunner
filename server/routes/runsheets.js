@@ -150,16 +150,42 @@ function allowDelete(runsheet, user) {
 
 function buildListQuery(req) {
   const q = { productionId: req.headers['x-production-id'] };
-  if (req.query.mine) q.createdBy = req.user._id;
-  if (req.query.assignedToMe) q.assignedTo = req.user._id;
-  if (req.query.open) {
-    q.status = 'open';
-    q.assignedTo = { $in: [null, undefined] };
+
+  const openPool = !!req.query.open;
+
+  if (req.query.mine) {
+    q.createdBy = req.user._id;
   }
-  if (req.query.status) q.status = req.query.status;
-  if (req.query.purchaseType) q.purchaseType = req.query.purchaseType;
+
+  if (req.query.assignedToMe) {
+    q.assignedTo = req.user._id;
+  }
+
+  // OPEN POOL: status must be 'open' AND unassigned.
+  // This takes precedence over any explicit status filter.
+  if (openPool) {
+    q.status = 'open';
+    q.$or = [
+      { assignedTo: null },
+      { assignedTo: { $exists: false } },
+    ];
+  } else if (req.query.status) {
+    // Only apply explicit status when not using open pool.
+    q.status = req.query.status;
+  }
+
+  if (req.query.purchaseType) {
+    q.purchaseType = req.query.purchaseType;
+  }
+
+  // Optional: if you added a handwritten flag and want server-side filtering
+  if (req.query.handwritten) {
+    q.handwritten = true;
+  }
+
   return q;
 }
+
 
 /** Dates: undefined → not provided; null/'' → clear; Date → parsed */
 function parseDateInputStrict(v, fieldName = 'date') {
@@ -238,16 +264,17 @@ function boolish(v) {
   return undefined;
 }
 
-/* All routes below require auth + membership (sets req.headers['x-production-id']) */
-
-
 /* ----------------------------- List / Create ----------------------------- */
 router.get('/', async (req, res, next) => {
   try {
     const q = buildListQuery(req);
     const list = await Runsheet.find(q)
       .sort({ createdAt: -1 })
-      .select('title status date purchaseType pickupDate returnDate takeTo supplier set createdAt createdBy assignedTo photos receipts postLocation postAddress contact')
+      .select(
+        'title status date purchaseType pickupDate returnDate ' +
+        'takeTo supplier set createdAt createdBy assignedTo photos receipts ' +
+        'postLocation postAddress contact handwritten' // ⭐ include handwritten
+      )
       .populate('assignedTo', 'name role')
       .populate('createdBy', 'name')
       .populate('takeTo', 'name address')
@@ -261,7 +288,6 @@ router.get('/', async (req, res, next) => {
 });
 
 router.post('/', async (req, res, next) => {
-  
   try {
     const b = req.body || {};
 
@@ -304,10 +330,6 @@ router.post('/', async (req, res, next) => {
     // QC
     const qcItemsGood = boolish(b.qcItemsGood) ?? null;
 
-    
-
-    console.log(req.user);
-
     const rs = await Runsheet.create({
       productionId: req.headers['x-production-id'],
       title: b.title || 'Untitled',
@@ -319,6 +341,9 @@ router.post('/', async (req, res, next) => {
       photos: [],
       receipts: [],
       stops: [],
+
+      // ⭐ mark handwritten if requested (e.g., By Hand / Photo flows)
+      handwritten: boolish(b.handwritten) ?? false,
 
       purchaseType: b.purchaseType || 'purchase',
       pickupDate: pickupDateVal,
@@ -367,6 +392,11 @@ router.post('/', async (req, res, next) => {
     res.status(201).json(await loadFullScoped(rs._id, req.headers['x-production-id']));
   } catch (e) { next(e); }
 });
+
+/* ---------------------- Runsheet-level Items (attach) -------------------- */
+// ... unchanged code below ...
+
+
 
 /* ---------------------- Runsheet-level Items (attach) -------------------- */
 // Attach an existing Item to the runsheet (top-level items array)
@@ -554,6 +584,9 @@ router.patch('/:id', async (req, res, next) => {
 
  if (b.pdSignatureData !== undefined)   update.pdSignatureData = String(b.pdSignatureData || '');
     if (b.rdSignatureData !== undefined)   update.rdSignatureData = String(b.rdSignatureData || '');
+
+    // ⭐ allow updating handwritten flag
+    if (b.handwritten !== undefined)       update.handwritten     = !!boolish(b.handwritten);
 
     // Current doc (scoped)
     const current = await Runsheet.findOne({ _id: req.params.id, productionId: req.headers['x-production-id'] });

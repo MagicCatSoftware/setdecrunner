@@ -29,7 +29,7 @@
             @change="onPhotoPicked"
           />
           <button
-            class="btn"
+            class="btn btn--primary"
             :disabled="uploadingPhoto"
             @click="triggerPhotoPicker"
             title="Upload a photo of a runsheet to create a new record"
@@ -153,7 +153,7 @@
 
             <RouterLink
               class="btn"
-              :to="{ name: 'runsheet-edit', params: { slug, id: r._id } }"
+              :to="{ name: 'runsheet-edit', params: { slug: slug.value, id: r._id } }"
             >
               Edit Runsheet
             </RouterLink>
@@ -161,7 +161,7 @@
             <!-- Smart editor button: edit if handwritten exists, otherwise open canvas to start -->
             <RouterLink
               class="btn"
-              :to="{ name: 'runsheet-by-hand', params: { slug, id: r._id } }"
+              :to="{ name: 'runsheet-by-hand', params: { slug: slug.value, id: r._id } }"
               :title="isHandwritten(r) ? 'Continue handwriting on canvas' : 'Start handwriting on canvas'"
             >
               {{ isHandwritten(r) ? 'Edit Handwriting' : 'Open Canvas' }}
@@ -259,20 +259,6 @@
             <p v-if="assignError" class="error">{{ assignError }}</p>
           </div>
 
-          <!-- Peek: stops -->
-          <details class="peek" @toggle="(e)=> e.target.open && ensureDetails(r)">
-            <summary>Preview</summary>
-            <div v-if="details[r._id]" class="peek__body">
-              <div><strong>Stops:</strong> {{ details[r._id].stops?.length || 0 }}</div>
-              <div v-if="details[r._id].stops?.length" class="stops">
-                <div v-for="s in details[r._id].stops" :key="s._id" class="stop">
-                  <div class="stop__title">{{ s.title || s.place?.name }}</div>
-                  <div v-if="s.place?.address" class="stop__addr">{{ s.place.address }}</div>
-                </div>
-              </div>
-              <div v-else class="muted">No stops yet.</div>
-            </div>
-          </details>
         </div>
 
         <div v-if="!filteredList.length" class="empty">
@@ -358,18 +344,19 @@ function qs(obj = {}) {
   return s ? `?${s}` : '';
 }
 
-/* Build params for server-side filtering */
 function paramsForLoad() {
   const params = {};
   if (mine.value)         params.mine = 1;
   if (assignedToMe.value) params.assignedToMe = 1;
-  if (open.value)         params.open = 1;
+  // 🔥 do NOT send "open" – we'll handle that locally now
+  // if (open.value)      params.open = 1;
   if (statusFilter.value) params.status = statusFilter.value;
   if (typeFilter.value)   params.purchaseType = typeFilter.value;
+  // hint server to only return handwritten if needed
+  if (handOnly.value)     params.handwritten = 1;
   // production is scoped via x-production-id header
   return params;
 }
-
 /* api: server does mine/assigned/open/status/type; client does q + handOnly */
 const load = async () => {
   loading.value = true;
@@ -439,8 +426,20 @@ function pickFirstImage(obj) {
   return '';
 }
 
+/**
+ * Treat a runsheet as "handwritten" if:
+ * - it has OCR image data, OR
+ * - it has an explicit `handwritten: true` flag.
+ */
 function isHandwritten(r) {
-  return !!(r && r.ocr && r.ocr.latest && r.ocr.latest.image);
+  if (!r) return false;
+  if (r.handwritten === true) return true;
+
+  if (!r.ocr) return false;
+  const latest = r.ocr.latest || {};
+  if (latest.image || latest.imageUrl || latest.url) return true;
+  if (Array.isArray(r.ocr.images) && r.ocr.images.length) return true;
+  return false;
 }
 
 function ocrStatus(r) {
@@ -449,7 +448,13 @@ function ocrStatus(r) {
 
 function thumbFor(r) {
   if (isHandwritten(r)) {
-    const url = normalizeImg(r.ocr.latest.image);
+    const latest = (r.ocr && r.ocr.latest) || {};
+    const raw =
+      latest.image ||
+      latest.imageUrl ||
+      latest.url ||
+      (Array.isArray(r.ocr?.images) ? r.ocr.images[0] : '');
+    const url = normalizeImg(raw);
     return url || PLACEHOLDER_IMG;
   }
   const raw = pickFirstImage(r);
@@ -497,7 +502,8 @@ const createRSByHand = async () => {
     const rs = await api.post('/tenant/runsheets', {
       title: 'Untitled (By Hand)',
       status: 'draft',
-      productionId: pid
+      productionId: pid,
+      handwritten: true
     });
 
     router.push({ name: 'runsheet-by-hand', params: { slug: slug.value, id: rs._id } });
@@ -538,7 +544,8 @@ async function onPhotoPicked(ev) {
     const rs = await api.post('/tenant/runsheets', {
       title: niceTitle,
       status: 'draft',
-      productionId: pid
+      productionId: pid,
+      handwritten: true
     });
 
     const fd = new FormData();
@@ -691,16 +698,32 @@ const del = async (r) => {
 
 /* computed + routing */
 /* Only do LOCAL filters here: q (title) + handOnly. All others are server side. */
+/* computed + routing */
+/* Local filters: q (title), handOnly, open pool. Others are server-side. */
 const filteredList = computed(() => {
-  const term = q.value.trim().toLowerCase();
+  const term     = q.value.trim().toLowerCase();
   const wantHand = !!handOnly.value;
+  const wantOpen = !!open.value;
 
   return (list.value || []).filter((r) => {
     const titleOk = !term || (r.title || '').toLowerCase().includes(term);
-    const handOk = !wantHand || isHandwritten(r);
-    return titleOk && handOk;
+    const handOk  = !wantHand || isHandwritten(r);
+
+    // Open pool: status === 'open' AND unassigned
+    let openOk = true;
+    if (wantOpen) {
+      const assignedId =
+        r.assignedTo &&
+        (r.assignedTo._id || r.assignedTo); // works for populated or raw ObjectId
+
+      const unassigned = !assignedId;
+      openOk = r.status === 'open' && unassigned;
+    }
+
+    return titleOk && handOk && openOk;
   });
 });
+
 
 function viewRoute(r) {
   if (isHandwritten(r)) {
@@ -732,15 +755,12 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.badge--link {
-  cursor: pointer;
-  text-decoration: none;
-  border: 1px dashed currentColor;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.4rem;
+.hidden {
+  display: none;
 }
-.hidden { display: none; }
 </style>
+
+
 
 <style scoped>
 :root{

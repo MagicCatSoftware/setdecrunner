@@ -33,7 +33,7 @@
                 <div class="item__title">
                   <img
                     v-if="p.photo"
-                    :src="imgaeUrl(p.photo)"
+                    :src="imageUrl(p.photo)"
                     alt=""
                     class="thumb" width="96px" height="96px"
                   />
