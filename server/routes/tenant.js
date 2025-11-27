@@ -115,7 +115,7 @@ export async function requireOwner(req, res, next) {
         upserts.push(
           Production.updateOne(
             { _id: prod._id },
-            { $addToSet: { 'members': { user: userId } } }
+            { $addToSet: { members: { user: userId } } }
           )
         );
       }
@@ -192,8 +192,6 @@ export async function requireOwner(req, res, next) {
  * Source of truth: Production.members[]
  * (we no longer pull in all global users; only members of this production)
  */
-// tenantRoutes.js
-
 router.get('/members', async (req, res) => {
   try {
     // Must have user + x-production-id (your existing guard)
@@ -218,13 +216,13 @@ router.get('/members', async (req, res) => {
 
     // Normalize members into a simple array for the frontend
     let members = (prod.members || []).map((m) => ({
-      _id:          String(m._id),              // member subdoc id
-      user:         m.user || null,            // backing User id (optional, may be null)
-      email:        (m.email || '').trim(),
-      role:         m.role || 'editor',
+      _id:           String(m._id),              // member subdoc id
+      user:          m.user || null,            // backing User id (optional, may be null)
+      email:         (m.email || '').trim(),
+      role:          m.role || 'editor',
       siteAuthorized: !!m.siteAuthorized,
-      addedAt:      m.addedAt || null,
-      // You can add more fields here later if needed (e.g. displayName)
+      addedAt:       m.addedAt || null,
+      // extra fields can be added later (e.g. displayName)
     }));
 
     // Optional filter by substring in email
@@ -239,7 +237,7 @@ router.get('/members', async (req, res) => {
       (a.email || '').localeCompare(b.email || '')
     );
 
-    // 🔥 Final response is just the array (what your Vue code expects)
+    // Final response is just the array
     return res.json(members);
   } catch (e) {
     const code = e.status || 500;
@@ -249,9 +247,6 @@ router.get('/members', async (req, res) => {
     res.status(code).json({ error: e.message || 'Failed to list members' });
   }
 });
-
-
-
 
 /**
  * POST /members
@@ -392,6 +387,111 @@ router.delete('/members/:userId', requireOwner, async (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
+/* ------------------------------------------------------------------------ */
+/*                       NEW: GET /users/:userId                            */
+/* ------------------------------------------------------------------------ */
+/**
+ * GET /users/:userId
+ * Returns a user object for this production, by user id.
+ *
+ * - Requires valid x-production-id + logged-in user.
+ * - Requester must be owner or member of this production.
+ * - Target user must also be owner or member of this production.
+ */
+router.get('/tenantusers/:userId', async (req, res) => {
+  try {
+    if (!requireContext(req, res)) return;
+
+    const productionId = getProductionId(req);
+    const requesterId  = toId(req.user);
+    const { userId: memberKey } = req.params; // membership identifier (or user id)
+
+    if (!memberKey) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+
+    // Load production with owner + members to enforce membership
+    const prod = await Production.findById(productionId)
+      .select('_id ownerUserId owner members')
+      .lean();
+
+    if (!prod) {
+      return res.status(404).json({ error: 'Production not found' });
+    }
+
+    const ownerId  = prod.ownerUserId || prod.owner || null;
+    const members  = Array.isArray(prod.members) ? prod.members : [];
+    
+    // Helper to extract a userId from a member entry
+    const memberUserId = (m) => toId(m.user || m.userId);
+
+    // --- Resolve the membership entry from production.members ---
+    const membership = members.find((m) =>
+      // allow lookup by membership _id, linked user id, or userId field
+      idsEqual(m._id, memberKey) ||
+      idsEqual(m.user, memberKey) ||
+      idsEqual(m.userId, memberKey)
+    );
+
+    if (!membership) {
+      // Don't leak info about users in other productions
+      return res.status(404).json({ error: 'User not found in this production' });
+    }
+
+    const targetUserId = memberUserId(membership);
+    if (!targetUserId) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // --- Permission checks for the requester ---
+    const isRequesterOwner = ownerId && idsEqual(ownerId, requesterId);
+
+    const requesterIsMember = members.some((m) =>
+      idsEqual(memberUserId(m), requesterId)
+    );
+
+    if (!isRequesterOwner && !requesterIsMember) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Target must be either owner or member of this production
+    const targetIsOwner  = ownerId && idsEqual(ownerId, targetUserId);
+    const targetIsMember = members.some((m) =>
+      idsEqual(memberUserId(m), targetUserId)
+    );
+
+    if (!targetIsOwner && !targetIsMember) {
+      return res.status(404).json({ error: 'User not found in this production' });
+    }
+
+    // --- Return info directly from the membership record (no User lookup) ---
+    // Adjust these field names to match your actual members schema.
+    const out = {
+      // the underlying user id (for reference)
+      userId:    targetUserId,
+      // the membership id (this record in prod.members[])
+      memberId:  membership._id,
+
+      // Snapshotted / member-scoped fields
+      email:       membership.email       || membership.emailSnapshot       || '',
+      name:        membership.name        || membership.displayName         || '',
+      displayName: membership.displayName || membership.name                || '',
+      phone:       membership.phone       || membership.phoneSnapshot       || '',
+      role:        membership.role        || '',
+
+      // Any other per-member fields you might have:
+      // notes: membership.notes || '',
+      // permissions: membership.permissions || [],
+    };
+
+    return res.json(out);
+  } catch (e) {
+    console.error('GET /tenant/users/:userId error:', e);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 export default router;
 

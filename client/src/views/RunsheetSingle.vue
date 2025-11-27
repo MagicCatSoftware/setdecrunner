@@ -315,7 +315,7 @@ const sheetEl = ref(null);
 /* ---------- handwriting presence + routes ---------- */
 const hasSavedHand = computed(() => {
   const r = rs.value || {};
-  const hand = r.hand || null;                      // ← uses new schema field
+  const hand = r.hand || null;
   const hasStrokes = hand && Array.isArray(hand.strokes) && hand.strokes.length;
   return !!hasStrokes;
 });
@@ -346,6 +346,78 @@ const safeSplitLines = (s) =>
 /* ---------------- Company block (from Production) ---------------- */
 const production = ref(null);
 
+// Full members list for this production (from /tenant/members)
+const membersRaw = ref([]);
+
+// Users referenced in pdCompletedBy / rdCompletedBy (loaded by id)
+const completedUsers = ref({});
+
+/**
+ * Load a single user by id and cache it in completedUsers
+ */
+async function loadCompletedUser(id) {
+  if (!id) return;
+
+  const key = String(
+    typeof id === 'object' && id._id ? id._id : id
+  );
+  if (!key) return;
+
+  // already loaded for this key
+  if (completedUsers.value[key]) return;
+
+  try {
+    // 🔧 hits /tenant/tenantusers/:id which returns member-based info
+    const u = await api.get(`/tenant/tenantusers/${encodeURIComponent(key)}`);
+
+    // Normalize shape from the route: it returns { userId, memberId, name, displayName, email, phone, role }
+    const userId  = String(u.userId || u._id || u.id || key);
+    const memberId = u.memberId ? String(u.memberId) : null;
+
+    const norm = {
+      _id:        userId,
+      name:       u.name || u.displayName || '',
+      displayName:u.displayName || u.name || '',
+      email:      u.email || '',
+      phone:      u.phone || '',
+      role:       u.role || ''
+    };
+
+    // Store under the key used in the runsheet (pdCompletedBy / rdCompletedBy)
+    completedUsers.value[key] = norm;
+
+    // Also store under userId so other lookups by user id work too
+    if (userId && userId !== key) {
+      completedUsers.value[userId] = norm;
+    }
+
+    // Optionally also store under memberId if different
+    if (memberId && memberId !== key && memberId !== userId) {
+      completedUsers.value[memberId] = norm;
+    }
+  } catch (e) {
+    console.error('Failed to load completed user', key, e);
+    // mark as attempted so we don't hammer the API
+    completedUsers.value[key] = { _id: key };
+  }
+}
+
+/**
+ * Look at rs.pdCompletedBy / rs.rdCompletedBy and load those users.
+ */
+async function hydrateCompletedUsers() {
+  const r = rs.value || {};
+  const ids = [r.pdCompletedBy, r.rdCompletedBy]
+    .filter(Boolean)
+    .map((v) => (typeof v === 'object' && v._id ? v._id : v))
+    .filter(Boolean)
+    .map((v) => String(v));
+
+  if (!ids.length) return;
+
+  await Promise.all(ids.map(loadCompletedUser));
+}
+
 const companyAddrLines = computed(() =>
   safeSplitLines(
     production.value?.productionaddress ??
@@ -355,7 +427,86 @@ const companyAddrLines = computed(() =>
   )
 );
 
+/* ---------------- Build member map (userId -> {name,email,role}) ---------------- */
+
+// Map userId -> user info (from /tenant/members)
+const memberMap = computed(() => {
+  const map = {};
+
+  const pushUser = (u, roleHint) => {
+    if (!u) return;
+
+    let id = null;
+    let name = '';
+    let email = '';
+    let role = roleHint || '';
+    let phone = '';
+
+    if (typeof u === 'string') {
+      id = u;
+    } else if (typeof u === 'object') {
+      id    = u._id ? String(u._id) : null;
+      name  = u.name || u.displayName || '';
+      email = u.email || '';
+      role  = u.role || role;
+      phone = u.phone || '';
+    }
+
+    if (!id) return;
+    const key = String(id);
+
+    const prev = map[key] || {};
+    map[key] = {
+      _id: key,
+      name:  name  || prev.name  || '',
+      email: email || prev.email || '',
+      role:  role  || prev.role  || '',
+      phone: phone || prev.phone || '',
+    };
+  };
+
+  const arr = Array.isArray(membersRaw.value) ? membersRaw.value : [];
+
+  arr.forEach((m) => {
+    // common shapes:
+    // { user: { _id, name, email, ... }, role: 'driver' }
+    // { _id, name, email, role }  (already user)
+    if (m.user) {
+      pushUser(m.user, m.role || m.memberRole);
+    } else {
+      pushUser(m, m.role || m.memberRole);
+    }
+  });
+
+  return map;
+});
 /* ---------------- header helpers ---------------- */
+
+async function loadMembers() {
+  const prodId = production.value?._id;
+  if (!prodId) return;
+
+  try {
+    // Our api.get(path, params?, opts?)
+    const res = await api.get(
+      '/tenant/members',
+      {},
+      { headers: { 'x-production-id': prodId } }
+    );
+
+    let arr = [];
+    if (Array.isArray(res)) arr = res;
+    else if (res && Array.isArray(res.members)) arr = res.members;
+    else if (res && Array.isArray(res.users)) arr = res.users;
+    else if (res && Array.isArray(res.data)) arr = res.data;
+    else if (res && Array.isArray(res.results)) arr = res.results;
+
+    membersRaw.value = arr || [];
+  } catch (e) {
+    console.error('Failed to load members for print view', e);
+    membersRaw.value = [];
+  }
+}
 
 // 🔹 PURCHASE vs RENTAL label using schema's purchaseType
 const purchaseRentalLabel = computed(() => {
@@ -423,8 +574,11 @@ async function hydrateContactPerson() {
   contactPerson.value = null;
   if (!v) return;
   if (typeof v === 'string') {
-    try { contactPerson.value = await api.get(`/tenant/people/${v}`); }
-    catch { contactPerson.value = { _id: v, name: `#${v}`, role: '', phone: '', email: '' }; }
+    try {
+      contactPerson.value = await api.get(`/tenant/people/${v}`);
+    } catch {
+      contactPerson.value = { _id: v, name: `#${v}`, role: '', phone: '', email: '' };
+    }
   } else if (typeof v === 'object') {
     contactPerson.value = {
       _id: v._id,
@@ -435,10 +589,78 @@ async function hydrateContactPerson() {
     };
   }
 }
+
 const normalizeRole = (s) =>
   (typeof s === 'string' && s ? s.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) : '');
+
+/* ---- helper: resolve a user (string id or object) to display info using memberMap ---- */
+/* ---- helper: resolve a user (string id or object) to display info ---- */
+function resolveUser(u) {
+  if (!u) return null;
+
+  // ---------- case 1: string id ----------
+  if (typeof u === 'string') {
+    const key = String(u);
+
+    // 1) check completedUsers (pdCompletedBy / rdCompletedBy)
+    const cu = completedUsers.value[key];
+    if (cu) {
+      return {
+        _id:   String(cu._id || key),
+        name:  cu.name || cu.displayName || '',
+        email: cu.email || '',
+        role:  cu.role || '',
+        phone: cu.phone || '',
+      };
+    }
+
+    // 2) then check memberMap
+    const mu = memberMap.value[key];
+    if (mu) return { ...mu };
+
+    // 3) fallback: raw id
+    return { _id: key, name: `#${key}`, email: '', role: '', phone: '' };
+  }
+
+  // ---------- case 2: object ----------
+  if (typeof u === 'object') {
+    const id = u._id ? String(u._id) : null;
+
+    if (id) {
+      // 1) completedUsers
+      const cu = completedUsers.value[id];
+      if (cu) {
+        return {
+          _id:   String(cu._id || id),
+          name:  cu.name || cu.displayName || '',
+          email: cu.email || '',
+          role:  cu.role || '',
+          phone: cu.phone || '',
+        };
+      }
+
+      // 2) memberMap
+      const mu = memberMap.value[id];
+      if (mu) return { ...mu };
+    }
+
+    // 3) direct object fallback
+    return {
+      _id:   id || '',
+      name:  u.name || u.displayName || u.email || (id ? `#${id}` : ''),
+      email: u.email || '',
+      role:  u.role || '',
+      phone: u.phone || '',
+    };
+  }
+
+  return null;
+}
+
+
 const contactRows = computed(() => {
   const rows = [];
+
   if (contactPerson.value) {
     rows.push({
       key: contactPerson.value._id || 'contact',
@@ -449,21 +671,22 @@ const contactRows = computed(() => {
       email: contactPerson.value.email || ''
     });
   }
+
   const addUserRow = (u, keyLabel) => {
-    if (!u) return;
-    if (typeof u === 'string') {
-      rows.push({ key: keyLabel + ':' + u, isPrimary: false, name: `#${u}`, role: '', phone: '', email: '' });
-    } else {
-      rows.push({
-        key: keyLabel + ':' + (u._id || u.email || u.name || Math.random().toString(36).slice(2)),
-        isPrimary: false,
-        name: u.name || u.email || `#${u._id || ''}`,
-        role: normalizeRole(u.role),
-        phone: u.phone || '',
-        email: u.email || ''
-      });
-    }
+    const info = resolveUser(u);
+    if (!info) return;
+
+    rows.push({
+      key: keyLabel + ':' + (info._id || info.email || info.name || Math.random().toString(36).slice(2)),
+      isPrimary: false,
+      name: info.name || info.email || `#${info._id || ''}`,
+      role: normalizeRole(info.role),
+      phone: info.phone || '',
+      email: info.email || ''
+    });
   };
+
+  // Assigned driver as a contact row (shows email now)
   addUserRow(rs.value?.assignedTo, 'assignedTo');
 
   const seen = new Set();
@@ -476,12 +699,22 @@ const contactRows = computed(() => {
 });
 
 /* ---------------- misc helpers ---------------- */
-function fmt(d){ if(!d) return ''; const dt=new Date(d); return isNaN(dt)?'':dt.toLocaleDateString(); }
+function fmt(d){
+  if(!d) return '';
+  const dt=new Date(d);
+  return isNaN(dt)?'':dt.toLocaleDateString();
+}
 const boolLabel = (v) => (v === true ? 'YES' : v === false ? 'NO' : '—');
 const money = (n) => (typeof n === 'number' && isFinite(n))
   ? new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n)
   : '';
-const userLabel = (u) => (!u ? '' : (typeof u === 'string' ? ('#'+u) : (u.name || u.email || u._id || '')));
+
+/** COMPLETED BY label: prefer email, then name, then #id */
+const userLabel = (u) => {
+  const info = resolveUser(u);
+  if (!info) return '';
+  return info.email || info.name || `#${info._id || ''}`;
+};
 
 /* ---------------- share/print ---------------- */
 const shareMsg = ref('');
@@ -551,6 +784,7 @@ onMounted(async () => {
   try { me.value = await api.get('/tenant/tenantauth/me'); } catch {}
 
   await loadProduction();
+   await loadMembers();   
 
   const data = await api.get(`/tenant/runsheets/${route.params.id}`);
   rs.value = data;
@@ -567,6 +801,8 @@ onMounted(async () => {
   }
 
   await hydrateContactPerson();
+  await hydrateCompletedUsers(); 
+  
 });
 watch(() => slug.value, loadProduction);
 watch(() => rs.value?.contact, hydrateContactPerson);
@@ -647,6 +883,7 @@ async function doPrintImage() {
   }
 }
 </script>
+
 
 
 

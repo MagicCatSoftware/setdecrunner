@@ -911,7 +911,7 @@
         <div class="row row--tight">
           <input v-model="userSearch" placeholder="Search users…" class="input" />
           <button type="button" class="btn" @click.stop.prevent="searchUsers">Search</button>
-          <div class="muted" v-if="rs.assignedTo">Current: {{ rs.assignedTo?.name }}</div>
+          <div class="muted" v-if="rs.assignedTo">Current: {{ rs.assignedTo.email }}</div>
         </div>
         <div class="pillbar">
           <button
@@ -920,7 +920,7 @@
             class="pill"
             type="button"
             @click.stop.prevent="assign(u)"
-          >Assign {{ u.name }} ({{ u.role }})</button>
+          >Assign {{ u.email }} ({{ u.role }})</button>
         </div>
       </section>
 
@@ -1390,11 +1390,40 @@ const onPurchaseTypeChanged = async (ev) => {
 /* =========== Users search: PD + RD + Assign (shared helper) =========== */
 
 // Shared helper: tolerant to multiple response shapes from /tenant/members
+// Shared helper: tolerant to multiple response shapes from /tenant/members
 async function fetchMembers(term) {
   const q = (term || '').trim();
-  const params = q ? { q } : {};
+  const params = {};
 
-  const res = await api.get('/tenant/members', params);
+  if (q) params.q = q;
+
+  // Try to get productionId from the runsheet or the route
+  let productionId = null;
+
+  if (rs.value) {
+    // if the runsheet has a production or productionId field
+    if (rs.value.productionId) {
+      productionId = rs.value.productionId;
+    } else if (rs.value.production && typeof rs.value.production === 'string') {
+      productionId = rs.value.production;
+    } else if (rs.value.production && rs.value.production._id) {
+      productionId = rs.value.production._id;
+    }
+  }
+
+  // fallback: from route params if present
+  if (!productionId && route.params && route.params.productionId) {
+    productionId = route.params.productionId;
+  }
+
+  // Build headers (only set if we have a productionId)
+  const opts = productionId
+    ? { headers: { 'x-production-id': productionId } }
+    : undefined;
+
+  const res = await api.get('/tenant/members', params, opts);
+
+  
 
   if (Array.isArray(res)) return res;
   if (res && Array.isArray(res.members)) return res.members;
@@ -1552,14 +1581,16 @@ const userResults = ref([]);
 const searchUsers = async () => {
   try {
     userResults.value = await fetchMembers(userSearch.value);
-  } catch (e) {
+    
+  }
+   catch (e) {
     error.value = e?.response?.data?.error || 'Failed to search users';
     userResults.value = [];
   }
 };
 
 const assignedToLabel = computed(() => {
-  const v = rs.value && rs.value.assignedTo;
+  const v = rs.value.assignedTo ;
   if (!v) return '';
 
   if (typeof v === 'object') {
@@ -1576,35 +1607,37 @@ const assignedToLabel = computed(() => {
 
 const assign = async (u) => {
   if (!rs.value || !rs.value._id) return;
-
+  console.log(u._id);
   try {
     const resp = await api.post(
       `/tenant/runsheets/${rs.value._id}/assign`,
-      { userId: u._id }
+      { userId: u._id } // you said this part is correct
     );
 
+    // If backend returns the full runsheet (with assignedTo object), trust it
     if (resp && resp._id) {
-      rs.value = { ...rs.value, ...resp };
+      rs.value = resp;
     } else if (resp && (resp.assignedTo || resp.status)) {
+      // Keep assignedTo as the full object, not just email
       if (resp.assignedTo !== undefined) {
-        rs.value.assignedTo = resp.assignedTo;
+        rs.value.assignedTo = resp.assignedTo;      // <── IMPORTANT
       } else {
-        rs.value.assignedTo = u._id;
+        rs.value.assignedTo = u;                    // fallback to the selected user
       }
       if (resp.status) rs.value.status = resp.status;
     } else {
-      rs.value.assignedTo = u._id;
+      // Very last fallback
+      rs.value.assignedTo = u.email;
       rs.value.status = 'assigned';
     }
 
-    const map = memberMap.value;
-    const v = rs.value.assignedTo;
-    if (typeof v === 'string' && map[v]) {
-      rs.value.assignedTo = map[v];
-    }
+    // 🔥 REMOVE all the email-only overrides:
+    // - no mapping to map[v] here
+    // - no rs.value.assignedTo = resp.assignedTo.email
 
     stamp();
   } catch (e) {
+    console.error('assign() error', e);
     error.value = e?.response?.data?.error || 'Failed to assign';
   }
 };

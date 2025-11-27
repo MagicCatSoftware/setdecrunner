@@ -10,6 +10,7 @@ import Item from '../models/Item.js';
 import User from '../models/User.js';
 import Place from '../models/Place.js';
 import Supplier from '../models/Supplier.js';
+import Production from '../models/Production.js';
 
 import { authRequired, requireRole } from '../middleware/auth.js';
 import { requireMembership } from '../middleware/requireMembership.js';
@@ -138,7 +139,6 @@ const RD_TYPES = ['pu', 'take'];
 
 const populateLite = (q) =>
   q
-    .populate('assignedTo', 'name role')
     .populate('createdBy', 'name')
     .populate({ path: 'stops.place', select: 'name address lat lng' })
     .populate({ path: 'takeTo', select: 'name address lat lng' })
@@ -1315,36 +1315,162 @@ router.post('/:id/claim', async (req, res, next) => {
   }
 });
 
+
+// at top of file
+// import User from '../models/User.js';
+
 router.post('/:id/assign', async (req, res, next) => {
   try {
-    const { userId } = req.body || {};
-    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const productionId = req.headers['x-production-id'];
+    const { id } = req.params;
+    let { userId } = req.body || {};
 
-    const user = await User.findOne({ _id: userId }).select('_id');
-    if (!user) return res.status(400).json({ error: 'User not found' });
+    if (!productionId) {
+      return res.status(400).json({ error: 'x-production-id header required' });
+    }
+    if (!userId) {
+      return res.status(400).json({ error: 'userId required' });
+    }
 
+    // --- Normalise userId if frontend passed a whole object ---
+    if (typeof userId === 'object' && userId !== null) {
+      userId =
+        userId._id ||
+        userId.id ||
+        userId.userId ||
+        (userId.user && (userId.user._id || userId.user)) ||
+        userId;
+    }
+
+    let userIdStr = String(userId);
+
+    // ---- Load production with members ----
+    const production = await Production.findOne({ _id: productionId }).lean();
+    if (!production) {
+      return res.status(404).json({ error: 'Production not found' });
+    }
+
+    const members = Array.isArray(production.members) ? production.members : [];
+
+    // STRICT helper: only ever return *user* IDs, never membership _id
+    const extractMemberUserId = (m) => {
+      if (!m) return null;
+
+      if (typeof m === 'string') return m;                // plain userId string
+      if (m._id) return m._id;                      // { userId: ObjectId }
+      if (m.user && m.user._id) return m.user._id;        // { user: { _id } }
+      if (m.user) return m.user;                          // { user: ObjectId }
+
+      // DO NOT fall back to m._id here; that’s the membership doc id
+      return null;
+    };
+
+    // Build:
+    // - memberIds (array of user IDs as strings)
+    // - membershipById (map of membership _id -> membership doc)
+    const membershipById = new Map();
+    const memberIds = [];
+
+    for (const m of members) {
+      if (m && m._id) {
+        membershipById.set(String(m._id), m); // membership doc id
+        console.log(m._id);
+      }
+      const mid = extractMemberUserId(m);
+      
+      if (mid) memberIds.push(String(mid));
+    }
+
+    // If the frontend passed a membership _id instead of a userId, remap it
+    if (!memberIds.includes(userIdStr) && membershipById.has(userIdStr)) {
+      const m = membershipById.get(userIdStr);
+      const realUserId = extractMemberUserId(m);
+      if (realUserId) {
+        userIdStr = String(realUserId);
+      }
+    }
+
+    const isMember =
+      (production.ownerUserId && String(production.ownerUserId) === userIdStr) ||
+      memberIds.includes(userIdStr);
+
+    if (!isMember) {
+      return res.status(400).json({
+        error: 'user_not_in_production',
+        debug: {
+          userId: userIdStr,
+          rawRequested: req.body.userId,
+          memberIds,
+          rawMembersCount: members.length,
+        },
+      });
+    }
+
+    // ---- Assign runsheet within this production ----
     const rs = await Runsheet.findOne({
-      _id: req.params.id,
-      productionId: req.headers['x-production-id'],
+      _id: id,
+      productionId,
     });
-    if (!rs) return res.status(404).json({ error: 'Not found' });
 
-    rs.assignedTo = user._id;
+    if (!rs) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    // Store the *canonical user id* (not membership id)
+    rs.assignedTo = userIdStr;
+
     if (['draft', 'open', 'claimed'].includes(rs.status)) {
       rs.status = 'assigned';
     }
+
     await rs.save();
 
-    res.json(
-      await loadFullScoped(
-        rs._id,
-        req.headers['x-production-id']
-      )
-    );
+    // Load full runsheet data (what you were returning before)
+    const full = await loadFullScoped(rs._id, productionId);
+
+    // 🔹 Hydrate assignedTo from Production.members only
+    const membership = members.find((m) => {
+      const mid = extractMemberUserId(m);
+      return mid && String(mid) === userIdStr;
+    });
+
+    if (membership) {
+      full.assignedTo = {
+        // underlying ids
+        userId:   userIdStr,
+        memberId: membership._id ? String(membership._id) : null,
+
+        // snapshot + member-scoped fields
+        email:       membership.email       || membership.emailSnapshot       || '',
+        name:        membership.name        || membership.displayName         || '',
+        displayName: membership.displayName || membership.name                || '',
+        phone:       membership.phone       || membership.phoneSnapshot       || '',
+        role:        membership.role        || membership.memberRole          || '',
+      };
+    } else {
+      // Fallback so frontend still has something
+      full.assignedTo = {
+        userId:   userIdStr,
+        memberId: null,
+        email:    '',
+        name:     '',
+        displayName: '',
+        phone:    '',
+        role:     '',
+      };
+    }
+    
+    return res.json(full);
   } catch (e) {
     next(e);
   }
 });
+
+
+
+
+
+
 
 router.post('/:id/release', async (req, res, next) => {
   try {
