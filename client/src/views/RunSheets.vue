@@ -120,8 +120,8 @@
               <div class="meta">
                 <span>Created: {{ shortDate(r.createdAt) }}</span>
                 <span v-if="r.date"> · For: {{ shortDate(r.date) }}</span>
-                <span> · By: {{ r.createdBy?.name || '—' }}</span>
-                <span> · Assigned: {{ r.assignedTo?.name || '—' }}</span>
+                <span> · By: {{ createdByLabel(r) }}</span>
+                <span> · Assigned: {{ assignedLabel(r) }}</span>
               </div>
             </div>
           </div>
@@ -169,7 +169,7 @@
 
             <!-- Claim (open + unassigned) -->
             <button
-              v-if="r.status==='open' && !r.assignedTo"
+              v-if="r.status==='open' && !hasAssignee(r)"
               class="btn"
               :disabled="busyId===r._id"
               @click="claim(r)"
@@ -203,7 +203,7 @@
               :disabled="busyId===r._id"
               @click="toggleAssign(r)"
             >
-              {{ r.assignedTo ? 'Reassign' : 'Assign' }}
+              {{ hasAssignee(r) ? 'Reassign' : 'Assign' }}
             </button>
 
             <!-- Assignee (or Admin) can release back to open -->
@@ -310,6 +310,30 @@ const statuses = ['draft','open','assigned','claimed','in_progress','completed',
 /* production scope */
 const productionId = ref(localStorage.getItem('currentProductionId') || '');
 
+/* members cache (Production.members) */
+const allMembers = ref([]);
+
+/* my identity from legacy User (used only to match against members) */
+const myUserId = computed(() => {
+  const m = me.value;
+  if (!m) return '';
+  if (m.user && typeof m.user === 'object') {
+    return String(m.user._id || m.user.id || '');
+  }
+  return String(m._id || m.id || m.userId || '');
+});
+
+const myEmail = computed(() => {
+  const m = me.value;
+  if (!m) return '';
+  const email =
+    (m.user && m.user.email) ||
+    m.email ||
+    '';
+  return (email || '').toLowerCase();
+});
+
+/* Ensure production + header */
 async function ensureProductionId() {
   if (productionId.value) {
     api.setProductionId(productionId.value);
@@ -329,11 +353,157 @@ async function ensureProductionId() {
   return productionId.value;
 }
 
+/* Load production members (Production.members) */
+async function loadMembers() {
+  try {
+    await ensureProductionId();
+    const res = await api.get('/tenant/members');
+
+    if (Array.isArray(res)) {
+      allMembers.value = res;
+    } else if (res && Array.isArray(res.members)) {
+      allMembers.value = res.members;
+    } else if (res && Array.isArray(res.users)) {
+      allMembers.value = res.users;
+    } else if (res && Array.isArray(res.items)) {
+      allMembers.value = res.items;
+    } else if (res && Array.isArray(res.data)) {
+      allMembers.value = res.data;
+    } else if (res && Array.isArray(res.results)) {
+      allMembers.value = res.results;
+    } else {
+      allMembers.value = [];
+    }
+  } catch (e) {
+    console.error('Failed to load members for runsheets', e);
+    allMembers.value = [];
+  }
+}
+
+/**
+ * membershipIndex:
+ *  - byMembershipId: keyed by Production.members _id
+ *  - byUserId: keyed by underlying User._id or userId
+ */
+const membershipIndex = computed(() => {
+  const byMembershipId = {};
+  const byUserId = {};
+
+  for (const m of allMembers.value || []) {
+    if (!m) continue;
+
+    const memId = m._id || m.id;
+    let userId =
+      m.userId ||
+      m.user_id ||
+      (m.user && typeof m.user === 'object' && (m.user._id || m.user.id)) ||
+      (typeof m.user === 'string' && m.user) ||
+      '';
+
+    const normalized = {
+      membershipId: memId ? String(memId) : '',
+      userId: userId ? String(userId) : '',
+      email:
+        (m.user && typeof m.user === 'object' && m.user.email) ||
+        m.email ||
+        '',
+      name:
+        (m.user && typeof m.user === 'object' && (m.user.name || m.user.displayName)) ||
+        m.name ||
+        '',
+      displayName: m.displayName || '',
+      raw: m,
+      user: m.user && typeof m.user === 'object' ? m.user : null,
+    };
+
+    if (normalized.membershipId) {
+      byMembershipId[normalized.membershipId] = normalized;
+    }
+    if (normalized.userId) {
+      byUserId[normalized.userId] = normalized;
+    }
+  }
+
+  return { byMembershipId, byUserId };
+});
+
+/** Generic resolver: given any value (membershipId, userId, or object),
+ *  try to find the member record in Production.members
+ */
+function findMemberFromValue(v) {
+  if (!v) return null;
+  const { byMembershipId, byUserId } = membershipIndex.value;
+
+  // Object case (could be user doc or membership doc)
+  if (typeof v === 'object') {
+    const memId = v._id || v.id;
+    if (memId && byMembershipId[String(memId)]) {
+      return byMembershipId[String(memId)];
+    }
+
+    const u = v.user || v;
+    const uid = u.userId || u._id || u.id;
+    if (uid && byUserId[String(uid)]) {
+      return byUserId[String(uid)];
+    }
+
+    return null;
+  }
+
+  // Primitive id
+  const id = String(v);
+  if (byMembershipId[id]) return byMembershipId[id];
+  if (byUserId[id]) return byUserId[id];
+  return null;
+}
+
+/* 🔹 Does this runsheet have ANY assignee at all? (membership-based first, then raw) */
+function hasAssignee(r) {
+  if (!r || !r.assignedTo) return false;
+
+  // If we can resolve to a member, it's definitely assigned
+  if (findMemberFromValue(r.assignedTo)) return true;
+
+  const v = r.assignedTo;
+
+  // Otherwise, treat any non-empty id/object as "assigned"
+  if (typeof v === 'string' || typeof v === 'number') {
+    return String(v).trim().length > 0;
+  }
+  if (typeof v === 'object') {
+    if (v._id || v.id || v.userId || v.user) return true;
+  }
+
+  return false;
+}
+
+/* Is this runsheet assigned to the current user? */
+function isAssignedToCurrentUser(r) {
+  const myId = myUserId.value;
+  const myEm = myEmail.value;
+  if (!myId && !myEm) return false;
+
+  const mem = findMemberFromValue(r.assignedTo);
+  if (!mem) return false;
+
+  const memUserId = mem.userId;
+  const memEmail =
+    (mem.email ||
+      (mem.user && mem.user.email) ||
+      ''
+    ).toLowerCase();
+
+  if (myId && memUserId && String(memUserId) === myId) return true;
+  if (myEm && memEmail && memEmail === myEm) return true;
+
+  return false;
+}
+
 /* helpers */
 const isAdmin = computed(() => me.value?.role === 'admin' || me.value?.isAdmin === true);
 const stamp = () => { lastUpdated.value = new Date().toLocaleTimeString(); };
 
-/* Build query string */
+/* Build query string (only server-handled filters) */
 function qs(obj = {}) {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(obj)) {
@@ -346,18 +516,46 @@ function qs(obj = {}) {
 
 function paramsForLoad() {
   const params = {};
-  if (mine.value)         params.mine = 1;
-  if (assignedToMe.value) params.assignedToMe = 1;
-  // 🔥 do NOT send "open" – we'll handle that locally now
-  // if (open.value)      params.open = 1;
+  if (mine.value)          params.mine = 1;
+  // assignedToMe & open are handled client-side
   if (statusFilter.value) params.status = statusFilter.value;
   if (typeFilter.value)   params.purchaseType = typeFilter.value;
-  // hint server to only return handwritten if needed
   if (handOnly.value)     params.handwritten = 1;
-  // production is scoped via x-production-id header
   return params;
 }
-/* api: server does mine/assigned/open/status/type; client does q + handOnly */
+
+/* Labels – always try Production.members first; only fallback to raw id string */
+function createdByLabel(r) {
+  if (!r) return '—';
+  const mem = findMemberFromValue(r.createdBy);
+  if (mem) {
+    const email = mem.email || (mem.user && mem.user.email) || '';
+    const name  = mem.name || (mem.user && (mem.user.name || mem.user.displayName)) || mem.displayName || '';
+    if (email && name) return `${name} (${email})`;
+    return email || name || '—';
+  }
+
+  // No matching member; last-resort: show id as-is if string, otherwise blank
+  if (typeof r.createdBy === 'string') return r.createdBy;
+  return '—';
+}
+
+function assignedLabel(r) {
+  if (!r || !r.assignedTo) return '—';
+  const mem = findMemberFromValue(r.assignedTo);
+  if (mem) {
+    const email = mem.email || (mem.user && mem.user.email) || '';
+    const name  = mem.name || (mem.user && (mem.user.name || mem.user.displayName)) || mem.displayName || '';
+    if (email && name) return `${name} (${email})`;
+    return email || name || '—';
+  }
+
+  // No matching member; last-resort: id string
+  if (typeof r.assignedTo === 'string') return r.assignedTo;
+  return '—';
+}
+
+/* load runsheets */
 const load = async () => {
   loading.value = true;
   error.value = '';
@@ -426,11 +624,7 @@ function pickFirstImage(obj) {
   return '';
 }
 
-/**
- * Treat a runsheet as "handwritten" if:
- * - it has OCR image data, OR
- * - it has an explicit `handwritten: true` flag.
- */
+/* handwritten detection */
 function isHandwritten(r) {
   if (!r) return false;
   if (r.handwritten === true) return true;
@@ -626,7 +820,6 @@ const assign = async (r) => {
     const updated = await api.post(`/tenant/runsheets/${r._id}/assign`, { userId: selectedUserId.value });
     const idx = list.value.findIndex(x => x._id === r._id);
     if (idx !== -1) list.value[idx] = { ...list.value[idx], ...updated };
-    toggleAssign();
   } catch (e) {
     assignError.value = e?.body?.error || e?.message || 'Failed to assign';
   } finally {
@@ -665,9 +858,7 @@ const canShowAssign = (r) => {
 };
 
 const canRelease = (r) => {
-  const myId = me.value?._id || '';
-  const isMine = (r.assignedTo?._id || r.assignedTo) === myId;
-  return (isAdmin.value || isMine) && ['assigned','claimed','in_progress'].includes(r.status);
+  return isAdmin.value || isAssignedToCurrentUser(r);
 };
 
 const release = async (r) => {
@@ -697,33 +888,31 @@ const del = async (r) => {
 };
 
 /* computed + routing */
-/* Only do LOCAL filters here: q (title) + handOnly. All others are server side. */
-/* computed + routing */
-/* Local filters: q (title), handOnly, open pool. Others are server-side. */
+/* Local filters: q, handOnly, open, assignedToMe; server ones already in paramsForLoad */
 const filteredList = computed(() => {
-  const term     = q.value.trim().toLowerCase();
-  const wantHand = !!handOnly.value;
-  const wantOpen = !!open.value;
+  const term           = q.value.trim().toLowerCase();
+  const wantHand       = !!handOnly.value;
+  const wantOpen       = !!open.value;
+  const wantAssignedMe = !!assignedToMe.value;
 
   return (list.value || []).filter((r) => {
     const titleOk = !term || (r.title || '').toLowerCase().includes(term);
     const handOk  = !wantHand || isHandwritten(r);
 
-    // Open pool: status === 'open' AND unassigned
     let openOk = true;
     if (wantOpen) {
-      const assignedId =
-        r.assignedTo &&
-        (r.assignedTo._id || r.assignedTo); // works for populated or raw ObjectId
-
-      const unassigned = !assignedId;
-      openOk = r.status === 'open' && unassigned;
+      // 🔹 Open pool: ANY status, but must have NO assignee
+      openOk = !hasAssignee(r);
     }
 
-    return titleOk && handOk && openOk;
+    let assignedOk = true;
+    if (wantAssignedMe) {
+      assignedOk = isAssignedToCurrentUser(r);
+    }
+
+    return titleOk && handOk && openOk && assignedOk;
   });
 });
-
 
 function viewRoute(r) {
   if (isHandwritten(r)) {
@@ -738,9 +927,9 @@ const shortDate = (d) => {
   try { return new Date(d).toLocaleDateString(); } catch { return '—'; }
 };
 
-/* watch filters -> reload from server when they change */
+/* watch filters -> reload from server when they change (server-handled filters only) */
 watch(
-  [mine, assignedToMe, open, statusFilter, typeFilter],
+  [mine, statusFilter, typeFilter],
   () => {
     load();
   }
@@ -750,7 +939,10 @@ watch(
 onMounted(async () => {
   try { me.value = await apiGet('/tenant/tenantauth/me'); } catch { me.value = null; }
   await ensureProductionId();
-  await load();
+  await Promise.all([
+    loadMembers(),
+    load(),
+  ]);
 });
 </script>
 
@@ -759,6 +951,11 @@ onMounted(async () => {
   display: none;
 }
 </style>
+
+
+
+
+
 
 
 

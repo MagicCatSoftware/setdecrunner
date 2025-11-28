@@ -306,7 +306,7 @@ router.get('/', async (req, res, next) => {
           'takeTo supplier set createdAt createdBy assignedTo photos receipts ' +
           'postLocation postAddress contact handwritten'
       )
-      .populate('assignedTo', 'name role')
+      
       .populate('createdBy', 'name')
       .populate('takeTo', 'name address')
       .populate('supplier', 'name address phone contactName hours')
