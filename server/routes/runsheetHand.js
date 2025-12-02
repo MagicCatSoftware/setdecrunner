@@ -4,46 +4,63 @@ import Runsheet from '../models/RunSheet.js';
 
 const router = Router();
 
-// Validate a stroke payload quickly to avoid doc bloat or invalid data
-function sanitizeStrokes(strokes, limits = { maxStrokes: 5000, maxPoints: 100000 }) {
+/**
+ * VERY SIMPLE sanitizer:
+ * - Keeps all strokes as-is, including { tool: 'text', text, at, wrapW }
+ * - Ensures base shape for pen/eraser points is sane.
+ * - Does NOT strip unknown keys.
+ */
+function passThroughStrokes(strokes) {
   if (!Array.isArray(strokes)) return [];
-  const out = [];
-  let totalPoints = 0;
 
-  for (const s of strokes) {
-    if (!s || typeof s !== 'object') continue;
+  return strokes.map((s) => {
+    if (!s || typeof s !== 'object') return null;
+
+    // text strokes – keep everything the client sends
+    if (s.tool === 'text') {
+      return {
+        tool: 'text',
+        text: typeof s.text === 'string' ? s.text : '',
+        color: typeof s.color === 'string' ? s.color : '#000000',
+        size: Number.isFinite(s.size) ? s.size : 16,
+        at: {
+          x: Number.isFinite(s.at?.x) ? s.at.x : 0,
+          y: Number.isFinite(s.at?.y) ? s.at.y : 0
+        },
+        wrapW: Number.isFinite(s.wrapW) && s.wrapW > 0 && s.wrapW <= 1
+          ? s.wrapW
+          : 0.32
+      };
+    }
+
+    // pen / eraser strokes – keep points, don't kill extra keys
     const tool = (s.tool === 'eraser') ? 'eraser' : 'pen';
     const color = typeof s.color === 'string' ? s.color : '#000000';
-    let size = Number.isFinite(s.size) ? s.size : 4;
-    if (size < 1) size = 1;
-    if (size > 64) size = 64;
+    const size = Number.isFinite(s.size) ? s.size : 4;
 
     const pts = Array.isArray(s.points) ? s.points : [];
-    const cleanPts = [];
-    for (const p of pts) {
-      if (!p) continue;
-      const x = Number(p.x);
-      const y = Number(p.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      if (x < 0 || x > 1 || y < 0 || y > 1) continue;
-      cleanPts.push({ x, y });
-      totalPoints++;
-      if (totalPoints > limits.maxPoints) break;
-    }
-    if (cleanPts.length < 1) continue;
+    const cleanPts = pts.map((p) => ({
+      x: Number.isFinite(p?.x) ? p.x : 0,
+      y: Number.isFinite(p?.y) ? p.y : 0,
+      p: Number.isFinite(p?.p) ? p.p : 1
+    }));
 
-    out.push({ tool, color, size, points: cleanPts });
-    if (out.length >= limits.maxStrokes || totalPoints >= limits.maxPoints) break;
-  }
-
-  return out;
+    return {
+      ...s, // keep any extra keys you might add later
+      tool,
+      color,
+      size,
+      points: cleanPts
+    };
+  }).filter(Boolean);
 }
 
-// GET /api/tenant/runsheets/:id/hand
+// GET /api/tenant/runsheetsbyhand/:id/hand
 router.get('/:id/hand', async (req, res) => {
   try {
     const rs = await Runsheet.findById(req.params.id).select('hand');
     if (!rs) return res.status(404).json({ error: 'Runsheet not found' });
+
     const hand = rs.hand || {};
     return res.json({
       ok: true,
@@ -56,23 +73,29 @@ router.get('/:id/hand', async (req, res) => {
       }
     });
   } catch (e) {
+    console.error('GET /runsheetsbyhand/:id/hand error', e);
     return res.status(500).json({ error: 'Failed to fetch hand data' });
   }
 });
 
-// PUT /api/tenant/runsheets/:id/hand
+// PUT /api/tenant/runsheetsbyhand/:id/hand
 // Body: { baseWidth: number, baseHeight: number, strokes: Stroke[] }
 router.put('/:id/hand', async (req, res) => {
   try {
     const id = String(req.params.id || '').trim();
+    if (!id) {
+      return res.status(400).json({ error: 'id missing' });
+    }
+
     const baseWidth  = Number(req.body.baseWidth || 0);
     const baseHeight = Number(req.body.baseHeight || 0);
-    let strokes = sanitizeStrokes(req.body.strokes);
 
-    if (!id) return res.status(400).json({ error: 'id missing' });
-    if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight) || baseWidth <= 0 || baseHeight <= 0) {
+    if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight) ||
+        baseWidth <= 0 || baseHeight <= 0) {
       return res.status(400).json({ error: 'Invalid baseWidth/baseHeight' });
     }
+
+    const strokes = passThroughStrokes(req.body.strokes);
 
     const setDoc = {
       'hand.baseWidth': baseWidth,
@@ -83,7 +106,12 @@ router.put('/:id/hand', async (req, res) => {
       updatedAt: new Date(),
     };
 
-    const rs = await Runsheet.findByIdAndUpdate(id, { $set: setDoc }, { new: true, projection: { hand: 1 } });
+    const rs = await Runsheet.findByIdAndUpdate(
+      id,
+      { $set: setDoc },
+      { new: true, projection: { hand: 1 } }
+    );
+
     if (!rs) return res.status(404).json({ error: 'Runsheet not found' });
 
     return res.json({
@@ -91,8 +119,11 @@ router.put('/:id/hand', async (req, res) => {
       hand: rs.hand || {}
     });
   } catch (e) {
+    console.error('PUT /runsheetsbyhand/:id/hand error', e);
     return res.status(500).json({ error: 'Failed to save hand data' });
   }
 });
 
 export default router;
+
+

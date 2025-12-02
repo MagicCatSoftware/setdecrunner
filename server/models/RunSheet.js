@@ -1,4 +1,4 @@
-// server/models/RunSheet.js 
+// server/models/RunSheet.js
 import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
@@ -37,10 +37,10 @@ const RunAttachSchema = new Schema({
   photos:   { type: [String], default: [] },
 }, { _id: true });
 
-/* --------------------------- NEW: By-Hand Ink ---------------------------- */
-/* We store normalized strokes so they re-render nicely on any device.
-   Each point is in [0..1] relative to the canvas (natural) width/height.
-*/
+/* --------------------------- By-Hand Ink (old structs) ------------------- */
+/* These were used to strictly model strokes; we keep them here in case
+   you still have old docs, but the important change is below: `strokes`
+   will now be Mixed so it can hold text strokes too. */
 const HandPointSchema = new Schema({
   x: { type: Number, min: 0, max: 1, required: true },
   y: { type: Number, min: 0, max: 1, required: true },
@@ -53,10 +53,19 @@ const HandStrokeSchema = new Schema({
   points: { type: [HandPointSchema], default: [] },
 }, { _id: true });
 
+/* --------------------------- NEW: HandDataSchema ------------------------- */
+/* 🔴 IMPORTANT CHANGE:
+   - `strokes` is now `[Schema.Types.Mixed]` so we can store:
+     - pen / eraser strokes
+     - text helper strokes: { tool: 'text', text, at:{x,y}, wrapW, ... }
+*/
 const HandDataSchema = new Schema({
   baseWidth:   { type: Number, default: 0 },   // natural bg width used when recording
   baseHeight:  { type: Number, default: 0 },   // natural bg height used when recording
-  strokes:     { type: [HandStrokeSchema], default: [] },
+
+  // CHANGED: allow arbitrary stroke objects from the frontend
+  strokes:     { type: [Schema.Types.Mixed], default: [] },
+
   lastSavedAt: { type: Date, default: null },
   lastSavedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 }, { _id: false });
