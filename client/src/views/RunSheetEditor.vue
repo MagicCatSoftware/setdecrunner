@@ -950,6 +950,8 @@ const { me } = useAuth();
 const route = useRoute();
 const router = useRouter();
 
+const slug = computed(() => String(route.params.slug || ''));
+
 /* ------------------------------ QC state ------------------------------ */
 
 const itemsGoodSaving = ref(false);
@@ -2568,12 +2570,25 @@ async function createSupplier() {
 /* ============================ Misc / nav ============================ */
 
 const goToRunsheets = () => {
-  router.push('/runsheets');
+  // /:slug/runsheets   → route name: "runsheets"
+  router.push({
+    name: 'runsheets',
+    params: { slug: slug.value },
+  });
 };
 
 const goToRunsheetView = () => {
   if (!rs.value || !rs.value._id) return;
-  router.push(`/runsheets/${rs.value._id}`);
+
+  // Smart view route: /:slug/runsheetsview/:id  (name: "runsheet-view")
+  // This will auto-redirect to official vs handwritten based on OCR/title.
+  router.push({
+    name: 'runsheet-view',
+    params: {
+      slug: slug.value,
+      id: rs.value._id,
+    },
+  });
 };
 
 const destroy = async () => {
@@ -2581,12 +2596,14 @@ const destroy = async () => {
   if (!confirm('Delete this runsheet? This cannot be undone.')) return;
   try {
     await api.del(`/tenant/runsheets/${rs.value._id}`);
-    router.push('/runsheets');
+    router.push({
+      name: 'runsheets',
+      params: { slug: slug.value },
+    });
   } catch (e) {
     error.value = e?.response?.data?.error || 'Failed to delete runsheet';
   }
 };
-
 /* ============================ Lifecycle ============================ */
 
 onMounted(async () => {

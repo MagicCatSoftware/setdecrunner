@@ -5,56 +5,84 @@
     <div class="dash container">
       <!-- Welcome / Quick actions -->
       <section class="panel">
-        <div class="header-row">
-          <h1 class="title">Welcome, {{ me?.name || '—' }}</h1>
+  <div class="header-row">
+    <h1 class="title">Welcome, {{ me?.name || '—' }}</h1>
 
-          <div class="spacer"></div>
+    <div class="spacer"></div>
 
-          <div class="actions">
-            <!-- These first links were already working with slug -->
-            <RouterLink
-              class="nav__link"
-              :to="{ name: 'runsheets', params: { slug } }"
-              draggable="false"
-            >
-              Runsheets
-            </RouterLink>
+    <div class="actions">
+      <!-- Primary actions -->
+      <RouterLink
+        class="btn btn--primary"
+        :to="{ name: 'runsheets', params: { slug } }"
+        draggable="false"
+      >
+        Runsheets
+      </RouterLink>
 
-            <RouterLink
-              class="nav__link"
-              :to="{ name: 'items', params: { slug } }"
-              draggable="false"
-            >
-              Items
-            </RouterLink>
+      <RouterLink
+        class="btn btn--primary"
+        :to="{ name: 'runsheet-new', params: { slug } }"
+        draggable="false"
+      >
+        + New Runsheet
+      </RouterLink>
 
-            <RouterLink
-              class="nav__link"
-              :to="{ name: 'places', params: { slug } }"
-              draggable="false"
-            >
-              Dashboard
-            </RouterLink>
+      <!-- Secondary shortcuts -->
+      <RouterLink
+        class="btn btn--ghost"
+        :to="{ name: 'items', params: { slug } }"
+        draggable="false"
+      >
+        Items
+      </RouterLink>
 
-            <RouterLink
-              v-if="me?.role === 'admin'"
-              class="btn"
-              :to="{ name: 'admin/users', params: { slug } }"
-            >
-              Items
-            </RouterLink>
+      <RouterLink
+        class="btn btn--ghost"
+        :to="{ name: 'places', params: { slug } }"
+        draggable="false"
+      >
+        Places
+      </RouterLink>
 
-            <RouterLink
-              class="nav__link"
-              :to="{ name: 'runsheet-new', params: { slug } }"
-              draggable="false"
-            >
-              Create Runsheet
-            </RouterLink>
-          </div>
-        </div>
-        <p class="muted">Use the shortcuts above to jump right in.</p>
-      </section>
+      <RouterLink
+        class="btn btn--ghost"
+        :to="{ name: 'people', params: { slug } }"
+        draggable="false"
+      >
+        People
+      </RouterLink>
+
+      <RouterLink
+        class="btn btn--ghost"
+        :to="{ name: 'sets', params: { slug } }"
+        draggable="false"
+      >
+        Sets
+      </RouterLink>
+
+      <RouterLink
+        class="btn btn--ghost"
+        :to="{ name: 'driver', params: { slug } }"
+        draggable="false"
+      >
+        Driver View
+      </RouterLink>
+
+      <!-- Admin only -->
+      <RouterLink
+        v-if="me?.role === 'admin'"
+        class="btn btn--danger"
+        :to="{ name: 'admin-users', params: { slug } }"
+        draggable="false"
+      >
+        Admin Users
+      </RouterLink>
+    </div>
+  </div>
+
+  <p class="muted">Tap a button above to jump into the most common tools.</p>
+</section>
 
       <!-- Stats -->
       <section class="stats">
@@ -516,14 +544,28 @@ onMounted(async () => {
 
   
 <style scoped>
-/* ---------- Layout ---------- */
+/* ==========================
+   ROOT LAYOUT
+========================== */
+
+.dash {
+  width: 100%;
+  max-width: 100%;
+}
+
 .container {
   max-width: 1120px;
+  width: 100%;
   margin: 0 auto;
   padding: 24px 16px;
   display: grid;
   gap: 24px;
+  box-sizing: border-box;
 }
+
+/* ==========================
+   PANELS
+========================== */
 
 .panel {
   background: #fff;
@@ -531,22 +573,56 @@ onMounted(async () => {
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0,0,0,.04);
   padding: 16px 18px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
+
+/* ==========================
+   HEADER / ACTIONS
+========================== */
 
 .header-row {
   display: flex;
   align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
 }
+
+.spacer {
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.actions .btn {
+  min-width: 120px;
+  justify-content: center;
+  text-align: center;
+}
+
+/* ==========================
+   ROWS
+========================== */
 
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
 }
 
-/* ---------- Typography ---------- */
+/* ==========================
+   TYPOGRAPHY
+========================== */
+
 .title {
   font-size: 20px;
   font-weight: 600;
@@ -564,15 +640,6 @@ onMounted(async () => {
   font-size: 12px;
 }
 
-.warn {
-  color: #b42318;
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: #fee4e2;
-  border: 1px solid #fecdca;
-}
-
 .error {
   color: #b42318;
   background: #fff1f0;
@@ -581,29 +648,10 @@ onMounted(async () => {
   border-radius: 8px;
 }
 
-/* ---------- Chips / Badges ---------- */
-.chip {
-  text-transform: uppercase;
-  font-size: 11px;
-  border: 1px solid #ddd;
-  border-radius: 999px;
-  padding: 2px 8px;
-  color: #333;
-  background: #fafafa;
-}
+/* ==========================
+   BUTTONS
+========================== */
 
-.badge {
-  text-transform: uppercase;
-  font-size: 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 2px 6px;
-  color: #333;
-  background: #fff;
-  margin-left: 8px;
-}
-
-/* ---------- Buttons & Links ---------- */
 .btn {
   appearance: none;
   border: 1px solid #d6d6d6;
@@ -620,117 +668,152 @@ onMounted(async () => {
   gap: 6px;
   transition: background .15s ease, border-color .15s ease, transform .02s ease;
 }
-.btn:hover { background: #efefef; border-color: #cdcdcd; }
-.btn:active { transform: translateY(1px); }
-.btn[disabled] { opacity: .6; cursor: not-allowed; }
+
+.btn:hover {
+  background: #efefef;
+  border-color: #cdcdcd;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn[disabled] {
+  opacity: .6;
+  cursor: not-allowed;
+}
 
 .btn--primary {
   background: #111827;
   color: #fff;
   border-color: #111827;
 }
-.btn--primary:hover { background: #0b1220; border-color: #0b1220; }
 
-.link {
-  color: #0f172a;
-  font-weight: 600;
-  text-decoration: none;
-  border-bottom: 1px solid transparent;
-}
-.link:hover { border-bottom-color: #0f172a; }
-
-/* ---------- Actions row ---------- */
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.spacer {
-  margin-left: auto;
+.btn--primary:hover {
+  background: #0b1220;
+  border-color: #0b1220;
 }
 
-/* ---------- Stats ---------- */
+.btn--ghost {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+
+.btn--ghost:hover {
+  background: #f3f4f6;
+}
+
+/* ==========================
+   STATS
+========================== */
+
 .stats {
   display: grid;
-  gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
+
 @media (min-width: 760px) {
-  .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
+
 .card {
   background: #fff;
   border: 1px solid #ececec;
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0,0,0,.04);
   padding: 14px 16px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
+
 .stat__label {
   color: #6b7280;
   font-size: 12px;
   margin-bottom: 6px;
 }
+
 .stat__value {
   font-size: 28px;
   font-weight: 700;
   color: #111827;
 }
 
-/* ---------- Map container ---------- */
+/* ==========================
+   MAP
+========================== */
+
 #dashboard-map {
   width: 100%;
-  height: 420px;            /* ensures the map is visible without JS sizing */
+  max-width: 100%;
+  height: 420px;
   border: 1px solid #ececec;
   border-radius: 10px;
-  background: #f8fafc;      /* subtle placeholder before tiles load */
+  background: #f8fafc;
+  box-sizing: border-box;
 }
 
-/* ---------- List ---------- */
+/* ==========================
+   RECENT LIST
+========================== */
+
 .list {
   display: grid;
   gap: 12px;
 }
+
 .list__item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
-/* Runsheet thumbnail (photo) */
+/* Thumbnail */
 .list__item > img {
-  flex: 0 0 auto;
   width: 96px;
   height: 96px;
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid #ececec;
   background: #f7f7f7;
+  flex-shrink: 0;
 }
 
-/* Hide empty/broken thumbnails gracefully */
-.list__item > img:not([src]), 
+.list__item > img:not([src]),
 .list__item > img[src=""] {
   display: none;
 }
 
-.item__main { 
-  flex: 1 1 auto; 
-  min-width: 0; 
+/* Main text */
+.item__main {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.item__title { 
-  display: flex; 
-  align-items: center; 
-  gap: 6px; 
+.item__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;          /* allow title + badge to wrap on small screens */
 }
 
-/* Keep long titles tidy next to a fixed-size thumbnail */
 .item__title .link {
   display: inline-block;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  /* white-space: nowrap;  <-- REMOVE this */
+  word-break: break-word;   /* allow long words/IDs to wrap instead of overflowing */
+}
+
+/* Optional: keep badge from stretching strangely */
+.item__title .badge {
+  flex: 0 0 auto;
 }
 
 .meta {
@@ -742,8 +825,8 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+/* Actions */
 .item__actions {
-  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -754,19 +837,59 @@ onMounted(async () => {
   text-align: center;
 }
 
-/* ---------- Responsive tweaks ---------- */
+/* ==========================
+   MOBILE RESPONSIVE
+========================== */
+
 @media (max-width: 820px) {
   .list__item > img {
     width: 84px;
     height: 84px;
   }
 }
+
 @media (max-width: 680px) {
-  .item__actions { width: 100%; justify-content: flex-start; }
-  .list__item { align-items: center; }
-  .list__item > img {
-    width: 72px;
-    height: 72px;
+
+  .container {
+    padding: 16px 12px;
+  }
+
+  .header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions {
+    width: 100%;
+  }
+
+  .actions .btn {
+    flex: 1 1 calc(50% - 6px);
+    min-width: unset;
+  }
+
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .list__item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .item__actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .item__actions .btn {
+    flex: 1 1 100%;
+  }
+
+  #dashboard-map {
+    height: 300px;
   }
 }
+
 </style>
+

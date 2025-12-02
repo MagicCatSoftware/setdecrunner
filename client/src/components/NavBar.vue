@@ -256,18 +256,176 @@ onMounted(fetchProduction);
 
 
 <style scoped>
-.nav { display:flex; align-items:center; gap:16px; padding:10px 14px; border-bottom:1px solid #eee; background:#fff; }
-.nav__logo { display:flex; align-items:center; gap:10px; }
-.nav__logo img { height:120px; width:auto; }
-.nav__logo-texts { display:flex; flex-direction:column; line-height:1.1; }
-.nav__logo-text { font-weight:700; }
-.nav__production { font-size:.9rem; color:#666; }
-.nav__links { display:flex; gap:10px; flex-wrap:wrap; margin-left:12px; }
-.nav__link { color:#333; text-decoration:none; padding:6px 8px; border-radius:8px; }
-.nav__link--admin { background:#f3f5ff; border:1px solid #dfe5ff; }
-.nav__right { margin-left:auto; display:flex; align-items:center; gap:8px; }
-.nav__avatar { width:28px; height:28px; border-radius:50%; object-fit:cover; }
-.nav__name { max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#444; }
-.btn.btn--ghost { background:transparent; border:1px solid #ddd; border-radius:8px; padding:6px 10px; cursor:pointer; }
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+}
+
+/* Left: logo + production */
+.nav__logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nav__logo img {
+  height: 120px;
+  width: auto;
+}
+.nav__logo-texts {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.nav__logo-text {
+  font-weight: 700;
+}
+.nav__production {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+/* Middle: links */
+.nav__links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: 12px;
+}
+.nav__link {
+  color: #333;
+  text-decoration: none;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.nav__link--admin {
+  background: #f3f5ff;
+  border: 1px solid #dfe5ff;
+}
+
+/* Right: user + logout */
+.nav__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.nav__name {
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #444;
+}
+
+/* A generic ghost button style if needed */
+.btn.btn--ghost {
+  background: transparent;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+/* -------------------- Mobile tweaks -------------------- */
+
+/* Tablets / small laptops */
+@media (max-width: 900px) {
+  .nav__logo img {
+    height: 80px;
+  }
+
+  .nav__links {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin-left: 0;
+  }
+
+  .nav__link {
+    font-size: 0.85rem;
+  }
+
+  .nav__right {
+    gap: 6px;
+  }
+
+  .nav__name {
+    max-width: 120px;
+  }
+}
+
+/* Phones */
+@media (max-width: 640px) {
+  .nav {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  /* Top row: logo + user info on same line */
+  .nav__logo {
+    flex: 1 1 auto;
+  }
+
+  .nav__logo img {
+    height: 60px;
+  }
+
+  .nav__right {
+    margin-left: 0;
+    margin-top: 4px;
+    margin-left: auto;
+  }
+
+  /* Links go full-width under */
+  .nav__links {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    margin-top: 6px;
+    padding-bottom: 4px;
+    border-top: 1px solid #f0f0f0;
+    padding-top: 6px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .nav__link {
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+
+  /* Optionally hide long name on very small screens */
+  .nav__name {
+    display: none;
+  }
+}
+
+/* Tiny phones */
+@media (max-width: 400px) {
+  .nav__logo img {
+    height: 48px;
+  }
+
+  .nav {
+    padding-inline: 10px;
+  }
+
+  .nav__links {
+    gap: 6px;
+  }
+}
 </style>
+
 

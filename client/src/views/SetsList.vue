@@ -143,13 +143,15 @@ h2 {
   transform: translateY(1px);
 }
 
-/* Make the "New Set" feel primary without extra classes */
+/* Make the "New Set" button black */
 .row button:last-child {
-  background: #5868ff;
+  background: #000;
   color: #fff;
+  border-color: #000;
 }
 .row button:last-child:hover {
-  background: #4454ff;
+  background: #111;
+  border-color: #111;
 }
 
 /* Messages */

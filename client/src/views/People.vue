@@ -151,11 +151,14 @@ onMounted(async () => {
   border: 1px solid #ececec;
   border-radius: 12px;
   box-shadow: 0 2px 10px rgba(0,0,0,.04);
+  /* 🔹 Add inner padding so inputs aren’t against the border */
+  padding: 16px 18px;
 }
 
 /* ---------- Toolbar ---------- */
 .toolbar {
-  padding: 12px;
+  /* remove padding from here, card now handles it */
+  padding: 0 0 12px 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -175,8 +178,20 @@ onMounted(async () => {
   border: none;
 }
 
-.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.row--tight { justify-content: flex-start; gap: 8px; }
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  /* 🔹 Small vertical spacing so it doesn’t feel cramped */
+  margin-bottom: 12px;
+}
+
+.row--tight {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
 .spacer { margin-left: auto; }
 
 /* ---------- Inputs ---------- */
@@ -191,8 +206,18 @@ onMounted(async () => {
   font: inherit;
 }
 .input { height: 34px; }
-.input--grow { width: 280px; }
-@media (max-width: 720px) { .input--grow { width: 100%; } }
+
+/* 🔹 Make the search input stretch nicely */
+.input--grow {
+  flex: 1 1 auto;
+  max-width: 320px;
+}
+
+@media (max-width: 720px) {
+  .input--grow {
+    max-width: 100%;
+  }
+}
 
 .textarea { width: 100%; resize: vertical; }
 
@@ -225,10 +250,14 @@ onMounted(async () => {
 
 /* ---------- People list items ---------- */
 .item {
-  padding: 14px 16px;
+  padding: 14px 0;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
+  border-top: 1px solid #f1f1f1;
+}
+.item:first-of-type {
+  border-top: none;
 }
 
 .item__main { min-width: 0; }
@@ -260,10 +289,11 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 
-/* avatar/thumb (40x40 is set inline; keep shared look) */
+/* avatar/thumb */
 .thumb {
   border: 1px solid #eee;
   background: #fafafa;
+  border-radius: 8px;
 }
 
 /* ---------- Empty & error ---------- */
@@ -275,7 +305,7 @@ onMounted(async () => {
 .muted { color: #6b7280; font-size: 12px; }
 
 .error {
-  margin: 12px;
+  margin-top: 12px;
   color: #b42318;
   background: #fff1f0;
   border: 1px solid #ffd7d5;
@@ -288,3 +318,4 @@ onMounted(async () => {
   .item { grid-template-columns: 1fr; }
 }
 </style>
+
