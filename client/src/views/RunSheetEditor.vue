@@ -2649,35 +2649,78 @@ onMounted(async () => {
   border-color: #ffe2df;
   background: #fff8f7;
 }
+
+/* ---------- Header (title + dates + status + actions) ---------- */
 .header {
   display: grid;
-  gap: 12px;
+  gap: 10px 16px; /* row / column gap */
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
 }
+
+/* Title always full-width on its own row */
 .header .input--title {
   grid-column: 1 / -1;
 }
+
+/* Actions row full-width */
 .header__actions {
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
   grid-column: 1 / -1;
+  flex-wrap: wrap; /* let buttons wrap instead of overflowing */
 }
-.saved { margin-left: auto; }
+
+/* “Saved …” text on its own row, right-aligned */
+.saved {
+  grid-column: 1 / -1;
+  justify-self: flex-end;
+  font-size: 12px;
+  color: #6b7280;
+}
 
 /* ---------- Typography ---------- */
-.subtitle { font-size: 16px; font-weight: 700; color: #111827; margin: 0; }
-.mini-title { font-size: 14px; font-weight: 600; }
+.subtitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+.mini-title {
+  font-size: 14px;
+  font-weight: 600;
+}
 
 /* ---------- Rows / Fields ---------- */
-.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.row--wrap { flex-wrap: wrap; }
-.row--tight { justify-content: flex-start; gap: 8px; }
-.field { display: grid; gap: 6px; }
-.field.w-full { width: 100%; }
-.label { font-size: 12px; color: #6b7280; }
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap; /* ✅ prevent overflow */
+}
+.row--wrap {
+  flex-wrap: wrap;
+}
+.row--tight {
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0; /* ✅ allow shrinking inside grid cells */
+}
+.field.w-full {
+  width: 100%;
+}
+.label {
+  font-size: 12px;
+  color: #6b7280;
+}
 
 /* ---------- Inputs ---------- */
 .input,
@@ -2690,27 +2733,69 @@ onMounted(async () => {
   padding: 8px 10px;
   font: inherit;
 }
-.input { height: 34px; }
+
+.input {
+  height: 34px;
+}
+
 .input--title {
   height: 40px;
   font-size: 18px;
   font-weight: 600;
 }
-.input--date { width: 220px; }
-.input--qty { width: 82px; text-align: right; }
-.textarea { width: 100%; resize: vertical; min-height: 72px; }
-.select { height: 34px; }
 
-@media (max-width: 920px) {
-  .header { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Dates in header: stretch to column width instead of fixed width */
+.input--date {
+  width: 100%;
+  max-width: 100%;
 }
-@media (max-width: 640px) {
-  .header { grid-template-columns: 1fr; }
-  .input--date, .select { width: 100%; }
+
+/* Qty inputs still narrow by default */
+.input--qty {
+  width: 82px;
+  text-align: right;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+}
+
+.select {
+  height: 34px;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Apply same styling to bare inputs/selects/textareas inside panels */
+.panel input[type="text"],
+.panel input[type="number"],
+.panel input[type="date"],
+.panel input[type="time"],
+.panel input[type="email"],
+.panel input[type="tel"],
+.panel select,
+.panel textarea {
+  border: 1px solid #d6d6d6;
+  background: #fff;
+  color: #111;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.panel textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+}
+.panel input[type="file"] {
+  font-size: 12px;
 }
 
 /* ---------- Radios / Checkboxes ---------- */
-.radio, .checkbox {
+.radio,
+.checkbox {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2721,7 +2806,10 @@ onMounted(async () => {
   cursor: pointer;
   user-select: none;
 }
-.radio input, .checkbox input { accent-color: #111827; }
+.radio input,
+.checkbox input {
+  accent-color: #111827;
+}
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -2739,22 +2827,37 @@ onMounted(async () => {
   gap: 6px;
   text-decoration: none;
   transition: background .15s ease, border-color .15s ease, transform .02s ease;
+  white-space: nowrap; /* keep label together; rows will wrap instead */
 }
-.btn:hover { background: #efefef; border-color: #cdcdcd; }
-.btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn:hover {
+  background: #efefef;
+  border-color: #cdcdcd;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
 .btn--primary {
   background: #111827;
   color: #fff;
   border-color: #111827;
 }
-.btn--primary:hover { background: #0b1220; border-color: #0b1220; }
+.btn--primary:hover {
+  background: #0b1220;
+  border-color: #0b1220;
+}
 .btn--danger {
   background: #fff;
   color: #b42318;
   border-color: #f1b3ac;
 }
-.btn--danger:hover { background: #fff5f5; border-color: #eba79f; }
+.btn--danger:hover {
+  background: #fff5f5;
+  border-color: #eba79f;
+}
 .btn--ghost {
   background: #fff;
   color: #1f2937;
@@ -2762,7 +2865,10 @@ onMounted(async () => {
 
 /* ---------- Pills (search results) ---------- */
 .pillbar {
-  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 .pill {
   border: 1px solid #e7e7e7;
@@ -2773,43 +2879,83 @@ onMounted(async () => {
   cursor: pointer;
   font-size: 13px;
 }
-.pill:hover { background: #f2f2f2; }
+.pill:hover {
+  background: #f2f2f2;
+}
 
 /* ---------- Select list (People) ---------- */
-.selectlist { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
-.selectlist__item { background: #fff; border: 1px solid #ececec; border-radius: 10px; }
+.selectlist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.selectlist__item {
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+}
 .selectlist__row {
   display: grid;
   grid-template-columns: 22px 1fr;
-  gap: 10px; padding: 10px 12px; cursor: pointer;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
 }
-.selectlist__meta { min-width: 0; }
-.selectlist__title { font-weight: 600; }
-.selectlist__sub { font-size: 12px; color: #6b7280; }
+.selectlist__meta {
+  min-width: 0;
+}
+.selectlist__title {
+  font-weight: 600;
+}
+.selectlist__sub {
+  font-size: 12px;
+  color: #6b7280;
+}
 
 /* ---------- Images / Thumbs ---------- */
-.thumbs { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
-.thumb { position: relative; width: 84px; height: 84px; }
+.thumbs {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.thumb {
+  position: relative;
+  width: 84px;
+  height: 84px;
+}
 .thumb__img {
-  width: 100%; height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   border: 1px solid #eee;
   border-radius: 10px;
   background: #fafafa;
 }
 .chip {
-  position: absolute; top: -6px; right: -6px;
-  width: 22px; height: 22px;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: #fff;
   border: 1px solid #dcdcdc;
-  display: grid; place-items: center;
+  display: grid;
+  place-items: center;
   cursor: pointer;
 }
-.chip--x { font-weight: 600; }
-.thumbs--small { gap: 6px; }
+.chip--x {
+  font-weight: 600;
+}
+.thumbs--small {
+  gap: 6px;
+}
 .thumb__img--sm {
-  width: 56px; height: 56px;
+  width: 56px;
+  height: 56px;
   border-radius: 8px;
 }
 
@@ -2824,25 +2970,61 @@ onMounted(async () => {
   gap: 10px;
 }
 .stop__head {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
-.stop__meta { min-width: 0; }
-.stop__title { font-weight: 700; }
-.stop__addr { color: #6b7280; font-size: 12px; }
-.stop__actions { display: flex; gap: 8px; }
+.stop__meta {
+  min-width: 0;
+}
+.stop__title {
+  font-weight: 700;
+}
+.stop__addr {
+  color: #6b7280;
+  font-size: 12px;
+}
+.stop__actions {
+  display: flex;
+  gap: 8px;
+}
 
-/* ---------- Items within Stop ---------- */
-.items { display: grid; gap: 10px; }
-.item.card {
-  border: 1px solid #f0f0f0; border-radius: 10px; padding: 10px 12px; background: #fff;
+/* ---------- Items within Stop / Attached Items ---------- */
+.items {
+  display: grid;
+  gap: 10px;
 }
-.item__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.item__name { font-weight: 600; }
-.qty { display: inline-flex; align-items: center; gap: 6px; }
+.item.card {
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.item__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.item__name {
+  font-weight: 600;
+}
+.qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* ---------- Links ---------- */
-.link { color: #0b1220; text-decoration: underline; }
-.link--small { font-size: 12px; }
+.link {
+  color: #0b1220;
+  text-decoration: underline;
+}
+.link--small {
+  font-size: 12px;
+}
 
 /* ---------- Signature ---------- */
 .sigpad {
@@ -2850,10 +3032,15 @@ onMounted(async () => {
   border-radius: 8px;
   background: #fff;
 }
-.sigpad:active { cursor: crosshair; }
+.sigpad:active {
+  cursor: crosshair;
+}
 
 /* ---------- Helpers ---------- */
-.muted { color: #6b7280; font-size: 12px; }
+.muted {
+  color: #6b7280;
+  font-size: 12px;
+}
 .error {
   margin-top: 12px;
   color: #b42318;
@@ -2862,17 +3049,79 @@ onMounted(async () => {
   padding: 10px 12px;
   border-radius: 8px;
 }
-.empty { padding: 12px; text-align: center; color: #6b7280; }
-.mt-1 { margin-top: 6px; }
-.mt-2 { margin-top: 10px; }
-.ml-auto { margin-left: auto; }
+.empty {
+  padding: 12px;
+  text-align: center;
+  color: #6b7280;
+}
+.mt-1 {
+  margin-top: 6px;
+}
+.mt-2 {
+  margin-top: 10px;
+}
+.ml-auto {
+  margin-left: auto;
+}
 
 /* ---------- Footer danger row ---------- */
-.danger-footer .row { align-items: center; }
+.danger-footer .row {
+  align-items: center;
+}
 
 /* ---------- Responsive ---------- */
-@media (max-width: 760px) {
-  .stop__head { flex-direction: column; align-items: flex-start; }
-  .header__actions { justify-content: flex-start; }
+@media (max-width: 920px) {
+  .header {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
+
+@media (max-width: 640px) {
+  .header {
+    grid-template-columns: 1fr;
+  }
+
+  /* On phones, let inputs/buttons stretch full width nicely */
+  .input--date,
+  .select {
+    width: 100%;
+  }
+
+  .row {
+    justify-content: flex-start;
+  }
+
+  .row--tight .input,
+  .row--tight .select,
+  .row--tight .btn,
+  .row--tight .checkbox,
+  .row--tight .radio {
+    flex: 0 1 auto;
+  }
+}
+
+/* ---------------- FORCE STATUS TO NEXT LINE ---------------- */
+
+/* If your status field is wrapped in .field with the select */
+.header .field:has(.select) {
+  grid-column: 1 / -1;   /* full row */
+}
+
+/* If it's just a bare select inside the header */
+.header > .select {
+  grid-column: 1 / -1;
+}
+
+/* If you wrapped status in a named class (safest option) */
+.header .field--status {
+  grid-column: 1 / -1;
+}
+
+/* Give it breathing room */
+.header .field--status {
+  margin-top: 6px;
+}
+
+
 </style>
+

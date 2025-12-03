@@ -90,31 +90,162 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.owner-nav { border-bottom:1px solid #eee; background:#fff; position: sticky; top: 0; z-index: 40; }
-.container { max-width: 1100px; margin: 0 auto; padding: 10px 16px; }
-.row { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
-.brand { font-weight:700; text-decoration:none; color:#111; }
-.right { display:flex; align-items:center; gap:10px; }
+.owner-nav {
+  border-bottom: 1px solid #eee;
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+/* Shared container */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 10px 16px;
+}
+
+/* Desktop / base layout */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.left {
+  flex-shrink: 0;
+}
+
+.brand {
+  font-weight: 700;
+  text-decoration: none;
+  color: #111;
+  font-size: 18px;
+}
+
+/* Right side (links + user) */
+.right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Link buttons */
 .link {
-  padding:6px 10px;
-  border:1px solid #e5e7eb;
-  border-radius:8px;
-  background:#f9fafb;
-  color:#111;
-  text-decoration:none;
+  padding: 6px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  color: #111;
+  text-decoration: none;
+  font-size: 14px;
+  white-space: nowrap;
 }
-.link:hover { background:#f3f4f6; }
+.link:hover {
+  background: #f3f4f6;
+}
+
+/* User chip */
 .userchip {
-  display:flex; align-items:center; gap:8px;
-  padding:4px 8px; border:1px solid #e5e7eb; border-radius:9999px; background:#fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9999px;
+  background: #fff;
 }
+
 .avatar {
-  width:22px; height:22px; border-radius:50%;
-  display:inline-flex; align-items:center; justify-content:center;
-  font-size:12px; font-weight:700; background:#eef2ff; color:#3730a3;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: #eef2ff;
+  color: #3730a3;
 }
-.uname { font-size: 13px; color:#333; }
+
+.uname {
+  font-size: 13px;
+  color: #333;
+}
+
+/* ================= Tablet ================= */
+@media (max-width: 900px) {
+  .container {
+    padding: 8px 12px;
+  }
+
+  .brand {
+    font-size: 17px;
+  }
+
+  .link {
+    font-size: 13px;
+    padding: 6px 9px;
+  }
+}
+
+/* ================= Phone ================= */
 @media (max-width: 640px) {
-  .uname { display: none; }
+  .container {
+    padding: 8px 12px;
+  }
+
+  .row {
+    /* Stack everything vertically, brand on top, buttons below */
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .left {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .brand {
+    font-size: 16px;
+  }
+
+  .right {
+    /* Let links wrap and fill width nicely */
+    flex: 1 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .link {
+    flex: 1 1 calc(50% - 8px); /* two per row on most phones */
+    text-align: center;
+    font-size: 13px;
+    padding: 8px 6px;
+  }
+
+  .userchip {
+    order: -1;                 /* show chip first in the row on mobile */
+    width: 100%;
+    justify-content: flex-start;
+    padding: 6px 10px;
+  }
+
+  .uname {
+    display: none;             /* keep chip compact, just the avatar */
+  }
+}
+
+/* ============= Very Small Phones ============= */
+@media (max-width: 400px) {
+  .link {
+    flex: 1 1 100%;            /* 1 per row on tiny devices */
+  }
 }
 </style>

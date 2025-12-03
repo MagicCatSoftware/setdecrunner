@@ -38,12 +38,14 @@
         <!-- Pick/Return dates -->
         <div class="row dates">
           <div class="half">
-            <span class="box" :class="{checked: !!rs?.pickupDate}"></span>
-            <span>Pick-Up Date:&nbsp;</span><span class="line">{{ fmt(rs?.pickupDate) || ' ' }}</span>
+            <span class="box" :class="{ checked: !!rs?.pickupDate }"></span>
+            <span>Pick-Up Date:&nbsp;</span>
+            <span class="line">{{ fmt(rs?.pickupDate) || ' ' }}</span>
           </div>
           <div class="half">
-            <span class="box" :class="{checked: !!rs?.returnDate}"></span>
-            <span>Return Date:&nbsp;</span><span class="line">{{ fmt(rs?.returnDate) || ' ' }}</span>
+            <span class="box" :class="{ checked: !!rs?.returnDate }"></span>
+            <span>Return Date:&nbsp;</span>
+            <span class="line">{{ fmt(rs?.returnDate) || ' ' }}</span>
           </div>
         </div>
 
@@ -56,30 +58,45 @@
             <div class="addr-line" v-if="companyBlock.address">{{ companyBlock.address }}</div>
             <div class="addr-line" v-if="companyBlock.phone">{{ companyBlock.phone }}</div>
           </div>
+
           <!-- Supplier -->
           <div class="panel supplier">
-            <div class="field"><span class="label-sm">SUPPLIER:</span><span class="fill">{{ supplierName }}</span></div>
-            <div class="field"><span class="fill">{{ supplierLine2 }}</span></div>
-            <div class="field"><span class="fill">{{ supplierLine3 }}</span></div>
-            <div class="field"><span class="fill">{{ supplierLine4 }}</span></div>
-            <div class="field"><span class="label-sm">TEL:</span><span class="fill">{{ supplierPhone }}</span></div>
             <div class="field">
-              <span class="label-sm">CONTACT:</span><span class="fill">{{ supplierContact }}</span>
-              <span class="label-sm hrs">HOURS</span><span class="fill fill--hrs">{{ supplierHours }}</span>
+              <span class="label-sm">SUPPLIER:</span>
+              <span class="fill">{{ supplierName }}</span>
+            </div>
+            <div class="field">
+              <span class="fill">{{ supplierLine2 }}</span>
+            </div>
+            <div class="field">
+              <span class="fill">{{ supplierLine3 }}</span>
+            </div>
+            <div class="field">
+              <span class="fill">{{ supplierLine4 }}</span>
+            </div>
+            <div class="field">
+              <span class="label-sm">TEL:</span>
+              <span class="fill">{{ supplierPhone }}</span>
+            </div>
+            <div class="field">
+              <span class="label-sm">CONTACT:</span>
+              <span class="fill">{{ supplierContact }}</span>
+              <span class="label-sm hrs">HOURS</span>
+              <span class="fill fill--hrs">{{ supplierHours }}</span>
             </div>
           </div>
         </div>
 
-        <!-- Items table -->
+        <!-- Items table (ONE COLUMN: dump all item data per line) -->
         <div class="table">
           <div class="thead">
-            <div class="th th-item">ITEM</div>
-            <div class="th th-desc">DESCRIPTION</div>
+            <div class="th th-item-full">ITEMS</div>
           </div>
           <div class="tbody">
             <div class="tr" v-for="(row, i) in tableRows" :key="i">
-              <div class="td td-item">{{ row.item }}</div>
-              <div class="td td-desc">{{ row.desc }}</div>
+              <div class="td td-item-full">
+                {{ row.item }}
+              </div>
             </div>
           </div>
         </div>
@@ -89,23 +106,29 @@
           <!-- Destination choices -->
           <div class="panel dest">
             <div class="checkline">
-              <span class="box" :class="{checked: rs?.postLocation==='hold_on_truck'}"></span>
+              <span class="box" :class="{ checked: rs?.postLocation === 'hold_on_truck' }"></span>
               <span>HOLD ON TRUCK</span>
             </div>
             <div class="checkline">
-              <span class="box" :class="{checked: rs?.postLocation==='setdec_storage'}"></span>
+              <span class="box" :class="{ checked: rs?.postLocation === 'setdec_storage' }"></span>
               <span>SET DEC STORAGE</span>
               <span class="fillline"></span>
             </div>
             <div class="checkline">
-              <span class="box" :class="{checked: rs?.postLocation==='office'}"></span>
+              <span class="box" :class="{ checked: rs?.postLocation === 'office' }"></span>
               <span>OFFICE</span>
               <span class="fillline"></span>
             </div>
             <div class="checkline">
-              <span class="box" :class="{checked: rs?.postLocation==='address_below'}"></span>
+              <span class="box" :class="{ checked: rs?.postLocation === 'address_below' }"></span>
               <span>ADDRESS BELOW</span>
-              <span class="fillline">{{ rs?.postLocation==='address_below' ? (rs?.postAddress || '') : '' }}</span>
+              <span class="fillline">
+                {{
+                  rs?.postLocation === 'address_below'
+                    ? (rs?.postAddress || '')
+                    : ''
+                }}
+              </span>
             </div>
           </div>
 
@@ -133,24 +156,28 @@
               <div class="cell">
                 <div class="mini">GET INVOICE</div>
                 <div class="inline">
-                  <span>YES</span><span class="box" :class="{checked: !!rs?.getInvoice}"></span>
+                  <span>YES</span>
+                  <span class="box" :class="{ checked: !!rs?.getInvoice }"></span>
                   <span class="gap"></span>
-                  <span>NO</span><span class="box" :class="{checked: rs && !rs.getInvoice}"></span>
+                  <span>NO</span>
+                  <span class="box" :class="{ checked: rs && !rs.getInvoice }"></span>
                 </div>
               </div>
 
               <div class="cell">
                 <div class="mini">GET DEPOSIT</div>
                 <div class="inline">
-                  <span>YES</span><span class="box" :class="{checked: !!rs?.getDeposit}"></span>
+                  <span>YES</span>
+                  <span class="box" :class="{ checked: !!rs?.getDeposit }"></span>
                   <span class="gap"></span>
-                  <span>NO</span><span class="box" :class="{checked: rs && !rs.getDeposit}"></span>
+                  <span>NO</span>
+                  <span class="box" :class="{ checked: rs && !rs.getDeposit }"></span>
                 </div>
               </div>
 
               <div class="cell">
                 <div class="mini">PAID</div>
-                <span class="box" :class="{checked: !!rs?.paid}"></span>
+                <span class="box" :class="{ checked: !!rs?.paid }"></span>
               </div>
 
               <div class="cell wide">
@@ -165,7 +192,9 @@
 
               <div class="cell wide">
                 <div class="mini">CHEQUE / CASH REC’D BY</div>
-                <div class="uline">{{ rs?.paymentReceivedBy || rs?.receivedBy || ' ' }}</div>
+                <div class="uline">
+                  {{ rs?.paymentReceivedBy || rs?.receivedBy || ' ' }}
+                </div>
               </div>
 
               <div class="cell">
@@ -199,15 +228,22 @@
               <span class="box" :class="{ checked: rs?.pdPaymentMethod === 'cash' }"></span>
             </div>
             <div class="line-row">
-              <span class="mini">DATE:</span><span class="line">{{ fmt(rs?.pdDate) || ' ' }}</span>
-              <span class="mini">TIME:</span><span class="line line--short">{{ rs?.pdTime || ' ' }}</span>
+              <span class="mini">DATE:</span>
+              <span class="line">{{ fmt(rs?.pdDate) || ' ' }}</span>
+              <span class="mini">TIME:</span>
+              <span class="line line--short">{{ rs?.pdTime || ' ' }}</span>
             </div>
             <div class="line-row">
-              <span class="mini">INSTRUCTIONS:</span><span class="line line--grow">{{ rs?.pdInstructions || ' ' }}</span>
+              <span class="mini">INSTRUCTIONS:</span>
+              <span class="line line--grow">{{ rs?.pdInstructions || ' ' }}</span>
             </div>
             <div class="line-row">
-              <span class="mini">COMPLETED BY:</span><span class="line">{{ userLabel(rs?.pdCompletedBy) || ' ' }}</span>
-              <span class="mini">DATE:</span><span class="line line--short">{{ fmt(rs?.pdCompletedOn) || ' ' }}</span>
+              <span class="mini">COMPLETED BY:</span>
+              <span class="line">{{ userLabel(rs?.pdCompletedBy) || ' ' }}</span>
+              <span class="mini">DATE:</span>
+              <span class="line line--short">{{
+                fmt(rs?.pdCompletedOn) || ' '
+              }}</span>
             </div>
           </div>
 
@@ -231,15 +267,22 @@
               <span class="box" :class="{ checked: !!rs?.rdCheque }"></span>
             </div>
             <div class="line-row">
-              <span class="mini">DATE:</span><span class="line">{{ fmt(rs?.rdDate) || ' ' }}</span>
-              <span class="mini">TIME:</span><span class="line line--short">{{ rs?.rdTime || ' ' }}</span>
+              <span class="mini">DATE:</span>
+              <span class="line">{{ fmt(rs?.rdDate) || ' ' }}</span>
+              <span class="mini">TIME:</span>
+              <span class="line line--short">{{ rs?.rdTime || ' ' }}</span>
             </div>
             <div class="line-row">
-              <span class="mini">INSTRUCTIONS:</span><span class="line line--grow">{{ rs?.rdInstructions || ' ' }}</span>
+              <span class="mini">INSTRUCTIONS:</span>
+              <span class="line line--grow">{{ rs?.rdInstructions || ' ' }}</span>
             </div>
             <div class="line-row">
-              <span class="mini">COMPLETED BY:</span><span class="line">{{ userLabel(rs?.rdCompletedBy) || ' ' }}</span>
-              <span class="mini">DATE:</span><span class="line line--short">{{ fmt(rs?.rdCompletedOn) || ' ' }}</span>
+              <span class="mini">COMPLETED BY:</span>
+              <span class="line">{{ userLabel(rs?.rdCompletedBy) || ' ' }}</span>
+              <span class="mini">DATE:</span>
+              <span class="line line--short">{{
+                fmt(rs?.rdCompletedOn) || ' '
+              }}</span>
             </div>
           </div>
         </div>
@@ -253,7 +296,9 @@
             <img v-if="rs?.qcSignatureData" :src="rs.qcSignatureData" alt="Signature" />
           </span>
           <span class="mini">DATE:</span>
-          <span class="line line--short">{{ fmt(rs?.rdCompletedOn || rs?.pdCompletedOn) || ' ' }}</span>
+          <span class="line line--short">{{
+            fmt(rs?.rdCompletedOn || rs?.pdCompletedOn) || ' '
+          }}</span>
         </div>
       </div>
 
@@ -329,7 +374,7 @@ const typedEditRoute = computed(() => ({
 const handEditRoute = computed(() => ({
   name: 'runsheet-by-hand',
   params: { slug: slug.value, id: route.params.id },
-  query:  { restore: '1' },
+  query: { restore: '1' },
 }));
 const handViewRoute = computed(() => ({
   name: 'runsheet-handwritten',
@@ -339,7 +384,7 @@ const handViewRoute = computed(() => ({
 const safeSplitLines = (s) =>
   (s || '')
     .split(/\n|,/)
-    .map(t => t.trim())
+    .map((t) => t.trim())
     .filter(Boolean)
     .slice(0, 3);
 
@@ -358,9 +403,7 @@ const completedUsers = ref({});
 async function loadCompletedUser(id) {
   if (!id) return;
 
-  const key = String(
-    typeof id === 'object' && id._id ? id._id : id
-  );
+  const key = String(typeof id === 'object' && id._id ? id._id : id);
   if (!key) return;
 
   // already loaded for this key
@@ -371,16 +414,16 @@ async function loadCompletedUser(id) {
     const u = await api.get(`/tenant/tenantusers/${encodeURIComponent(key)}`);
 
     // Normalize shape from the route: it returns { userId, memberId, name, displayName, email, phone, role }
-    const userId  = String(u.userId || u._id || u.id || key);
+    const userId = String(u.userId || u._id || u.id || key);
     const memberId = u.memberId ? String(u.memberId) : null;
 
     const norm = {
-      _id:        userId,
-      name:       u.name || u.displayName || '',
-      displayName:u.displayName || u.name || '',
-      email:      u.email || '',
-      phone:      u.phone || '',
-      role:       u.role || ''
+      _id: userId,
+      name: u.name || u.displayName || '',
+      displayName: u.displayName || u.name || '',
+      email: u.email || '',
+      phone: u.phone || '',
+      role: u.role || '',
     };
 
     // Store under the key used in the runsheet (pdCompletedBy / rdCompletedBy)
@@ -421,9 +464,9 @@ async function hydrateCompletedUsers() {
 const companyAddrLines = computed(() =>
   safeSplitLines(
     production.value?.productionaddress ??
-    production.value?.vAddress ??
-    production.value?.address ??
-    ''
+      production.value?.vAddress ??
+      production.value?.address ??
+      ''
   )
 );
 
@@ -445,10 +488,10 @@ const memberMap = computed(() => {
     if (typeof u === 'string') {
       id = u;
     } else if (typeof u === 'object') {
-      id    = u._id ? String(u._id) : null;
-      name  = u.name || u.displayName || '';
+      id = u._id ? String(u._id) : null;
+      name = u.name || u.displayName || '';
       email = u.email || '';
-      role  = u.role || role;
+      role = u.role || role;
       phone = u.phone || '';
     }
 
@@ -458,9 +501,9 @@ const memberMap = computed(() => {
     const prev = map[key] || {};
     map[key] = {
       _id: key,
-      name:  name  || prev.name  || '',
+      name: name || prev.name || '',
       email: email || prev.email || '',
-      role:  role  || prev.role  || '',
+      role: role || prev.role || '',
       phone: phone || prev.phone || '',
     };
   };
@@ -480,6 +523,7 @@ const memberMap = computed(() => {
 
   return map;
 });
+
 /* ---------------- header helpers ---------------- */
 
 async function loadMembers() {
@@ -488,11 +532,9 @@ async function loadMembers() {
 
   try {
     // Our api.get(path, params?, opts?)
-    const res = await api.get(
-      '/tenant/members',
-      {},
-      { headers: { 'x-production-id': prodId } }
-    );
+    const res = await api.get('/tenant/members', {}, {
+      headers: { 'x-production-id': prodId },
+    });
 
     let arr = [];
     if (Array.isArray(res)) arr = res;
@@ -519,7 +561,7 @@ const purchaseRentalLabel = computed(() => {
 const setName = computed(() => {
   const v = rs.value?.set;
   if (!v) return '';
-  if (typeof v === 'string') return v;  // fallback if not populated
+  if (typeof v === 'string') return v; // fallback if not populated
   return v.name || '';
 });
 
@@ -532,38 +574,86 @@ const setNumber = computed(() => {
 /* ---------------- supplier (prefer rs.supplier; fallback to takeTo) ---------------- */
 const supplierObj = computed(() => {
   const v = rs.value?.supplier ?? rs.value?.takeTo ?? null;
-  return (v && typeof v === 'object') ? v : null;
+  return v && typeof v === 'object' ? v : null;
 });
-const supplierAddressLines = computed(() => safeSplitLines(supplierObj.value?.address || ''));
-const supplierName    = computed(() => supplierObj.value?.name || '');
-const supplierLine2   = computed(() => supplierAddressLines.value[0] || '');
-const supplierLine3   = computed(() => supplierAddressLines.value[1] || '');
-const supplierLine4   = computed(() => supplierAddressLines.value[2] || '');
-const supplierPhone   = computed(() => supplierObj.value?.phone || '');
-const supplierContact = computed(() => supplierObj.value?.contactName || '');
-const supplierHours   = computed(() => supplierObj.value?.hours || '');
+const supplierAddressLines = computed(() =>
+  safeSplitLines(supplierObj.value?.address || '')
+);
+const supplierName = computed(() => supplierObj.value?.name || '');
+const supplierLine2 = computed(() => supplierAddressLines.value[0] || '');
+const supplierLine3 = computed(() => supplierAddressLines.value[1] || '');
+const supplierLine4 = computed(() => supplierAddressLines.value[2] || '');
+const supplierPhone = computed(() => supplierObj.value?.phone || '');
+const supplierContact = computed(
+  () => supplierObj.value?.contactName || ''
+);
+const supplierHours = computed(() => supplierObj.value?.hours || '');
 
-/* ---------------- items -> table rows ---------------- */
+/* ---------------- items -> table rows (single column) ---------------- */
+
+function formatStopItemLine(ri, stop) {
+  const parts = [];
+
+  const qty = ri.quantity ?? ri.qty;
+  if (qty) parts.push(`${qty}x`);
+
+  if (ri.name) parts.push(ri.name);
+
+  // Include place name if present
+  if (stop?.place?.name) {
+    parts.push(`@ ${stop.place.name}`);
+  }
+
+  // Notes on the same line
+  if (ri.notes) {
+    parts.push(`- ${ri.notes}`);
+  }
+
+  return parts.join(' ').trim() || 'Item';
+}
+
+function formatLooseItemLine(it) {
+  const parts = [];
+
+  const qty = it.quantity ?? it.qty;
+  if (qty) parts.push(`${qty}x`);
+
+  if (it.name) parts.push(it.name);
+
+  // Description on same line
+  if (it.description) {
+    parts.push(`- ${it.description}`);
+  }
+
+  return parts.join(' ').trim() || 'Item';
+}
+
 const itemsFlat = computed(() => {
   const out = [];
-  (rs.value?.stops || []).forEach(s => {
-    (s.items || []).forEach(ri => {
+
+  // Items inside stops[]
+  (rs.value?.stops || []).forEach((s) => {
+    (s.items || []).forEach((ri) => {
       out.push({
-        item: `${ri.name || 'Item'}${ri.quantity ? ' × ' + ri.quantity : ''}`,
-        desc: ri.notes || s.place?.name || ''
+        item: formatStopItemLine(ri, s),
       });
     });
   });
-  (rs.value?.items || []).forEach(it => {
-    const qty = it.quantity ?? it.qty;
-    out.push({ item: `${it.name || 'Item'}${qty ? ' × ' + qty : ''}`, desc: it.description || '' });
+
+  // Legacy / loose items on the runsheet
+  (rs.value?.items || []).forEach((it) => {
+    out.push({
+      item: formatLooseItemLine(it),
+    });
   });
+
   return out;
 });
+
 const MIN_ROWS = 14;
 const tableRows = computed(() => {
   const rows = itemsFlat.value.slice(0, 40);
-  while (rows.length < MIN_ROWS) rows.push({ item: ' ', desc: ' ' });
+  while (rows.length < MIN_ROWS) rows.push({ item: ' ' });
   return rows;
 });
 
@@ -577,7 +667,13 @@ async function hydrateContactPerson() {
     try {
       contactPerson.value = await api.get(`/tenant/people/${v}`);
     } catch {
-      contactPerson.value = { _id: v, name: `#${v}`, role: '', phone: '', email: '' };
+      contactPerson.value = {
+        _id: v,
+        name: `#${v}`,
+        role: '',
+        phone: '',
+        email: '',
+      };
     }
   } else if (typeof v === 'object') {
     contactPerson.value = {
@@ -585,15 +681,16 @@ async function hydrateContactPerson() {
       name: v.name || v.email || '—',
       role: v.role || '',
       phone: v.phone || '',
-      email: v.email || ''
+      email: v.email || '',
     };
   }
 }
 
 const normalizeRole = (s) =>
-  (typeof s === 'string' && s ? s.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) : '');
+  typeof s === 'string' && s
+    ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : '';
 
-/* ---- helper: resolve a user (string id or object) to display info using memberMap ---- */
 /* ---- helper: resolve a user (string id or object) to display info ---- */
 function resolveUser(u) {
   if (!u) return null;
@@ -606,10 +703,10 @@ function resolveUser(u) {
     const cu = completedUsers.value[key];
     if (cu) {
       return {
-        _id:   String(cu._id || key),
-        name:  cu.name || cu.displayName || '',
+        _id: String(cu._id || key),
+        name: cu.name || cu.displayName || '',
         email: cu.email || '',
-        role:  cu.role || '',
+        role: cu.role || '',
         phone: cu.phone || '',
       };
     }
@@ -631,10 +728,10 @@ function resolveUser(u) {
       const cu = completedUsers.value[id];
       if (cu) {
         return {
-          _id:   String(cu._id || id),
-          name:  cu.name || cu.displayName || '',
+          _id: String(cu._id || id),
+          name: cu.name || cu.displayName || '',
           email: cu.email || '',
-          role:  cu.role || '',
+          role: cu.role || '',
           phone: cu.phone || '',
         };
       }
@@ -646,17 +743,16 @@ function resolveUser(u) {
 
     // 3) direct object fallback
     return {
-      _id:   id || '',
-      name:  u.name || u.displayName || u.email || (id ? `#${id}` : ''),
+      _id: id || '',
+      name: u.name || u.displayName || u.email || (id ? `#${id}` : ''),
       email: u.email || '',
-      role:  u.role || '',
+      role: u.role || '',
       phone: u.phone || '',
     };
   }
 
   return null;
 }
-
 
 const contactRows = computed(() => {
   const rows = [];
@@ -668,7 +764,7 @@ const contactRows = computed(() => {
       name: contactPerson.value.name || '—',
       role: contactPerson.value.role || '',
       phone: contactPerson.value.phone || '',
-      email: contactPerson.value.email || ''
+      email: contactPerson.value.email || '',
     });
   }
 
@@ -677,12 +773,18 @@ const contactRows = computed(() => {
     if (!info) return;
 
     rows.push({
-      key: keyLabel + ':' + (info._id || info.email || info.name || Math.random().toString(36).slice(2)),
+      key:
+        keyLabel +
+        ':' +
+        (info._id ||
+          info.email ||
+          info.name ||
+          Math.random().toString(36).slice(2)),
       isPrimary: false,
       name: info.name || info.email || `#${info._id || ''}`,
       role: normalizeRole(info.role),
       phone: info.phone || '',
-      email: info.email || ''
+      email: info.email || '',
     });
   };
 
@@ -690,7 +792,7 @@ const contactRows = computed(() => {
   addUserRow(rs.value?.assignedTo, 'assignedTo');
 
   const seen = new Set();
-  return rows.filter(r => {
+  return rows.filter((r) => {
     const id = (r.email || '') + '|' + (r.name || '');
     if (seen.has(id)) return false;
     seen.add(id);
@@ -699,15 +801,21 @@ const contactRows = computed(() => {
 });
 
 /* ---------------- misc helpers ---------------- */
-function fmt(d){
-  if(!d) return '';
-  const dt=new Date(d);
-  return isNaN(dt)?'':dt.toLocaleDateString();
+function fmt(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  return isNaN(dt) ? '' : dt.toLocaleDateString();
 }
-const boolLabel = (v) => (v === true ? 'YES' : v === false ? 'NO' : '—');
-const money = (n) => (typeof n === 'number' && isFinite(n))
-  ? new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n)
-  : '';
+const boolLabel = (v) =>
+  v === true ? 'YES' : v === false ? 'NO' : '—';
+const money = (n) =>
+  typeof n === 'number' && isFinite(n)
+    ? new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 2,
+      }).format(n)
+    : '';
 
 /** COMPLETED BY label: prefer email, then name, then #id */
 const userLabel = (u) => {
@@ -718,25 +826,40 @@ const userLabel = (u) => {
 
 /* ---------------- share/print ---------------- */
 const shareMsg = ref('');
-const shareUrl = computed(() => `${location.origin}/${slug.value}/runsheetsview/${route.params.id}`);
-async function shareLink(){
+const shareUrl = computed(
+  () =>
+    `${location.origin}/${slug.value}/runsheetsview/${route.params.id}`
+);
+async function shareLink() {
   const url = shareUrl.value;
   try {
     if (navigator.share) {
-      await navigator.share({ title: rs.value?.title || 'Run Sheet', url });
+      await navigator.share({
+        title: rs.value?.title || 'Run Sheet',
+        url,
+      });
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(url);
       shareMsg.value = 'Link copied to clipboard';
       setTimeout(() => (shareMsg.value = ''), 2000);
     }
-  } catch {}
+  } catch {
+    // ignore
+  }
 }
 
 /* ---------------- load ---------------- */
 async function loadProduction() {
-  if (!slug.value) { production.value = null; return; }
+  if (!slug.value) {
+    production.value = null;
+    return;
+  }
   try {
-    const p = await api.get(`/tenant/getproductions/by_slug/${encodeURIComponent(slug.value)}`);
+    const p = await api.get(
+      `/tenant/getproductions/by_slug/${encodeURIComponent(
+        slug.value
+      )}`
+    );
     production.value = await api.get(`/tenant/productions/${p._id}`);
   } catch {
     production.value = null;
@@ -749,9 +872,13 @@ function normalizeAddress(raw) {
   const parts = String(raw)
     .replace(/\r\n/g, '\n')
     .split(/\n|,/)
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
-  return parts.join(', ').replace(/\s*,\s*,+/g, ', ').replace(/\s{2,}/g, ' ').trim();
+  return parts
+    .join(', ')
+    .replace(/\s*,\s*,+/g, ', ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 // Prefer new schema fields; fall back to virtuals; then legacy fields
@@ -765,10 +892,7 @@ const companyBlock = computed(() => {
     ' ';
   const title = p.title ?? p.vProductionTitle ?? '';
   const address = normalizeAddress(
-    p.productionaddress ??
-    p.vAddress ??
-    p.address ??
-    ''
+    p.productionaddress ?? p.vAddress ?? p.address ?? ''
   );
   const phone = p.productionphone ?? p.vPhone ?? p.phone ?? '';
   return {
@@ -776,36 +900,66 @@ const companyBlock = computed(() => {
     title,
     showTitle: !!title && title !== name,
     address,
-    phone
+    phone,
   };
 });
 
 onMounted(async () => {
-  try { me.value = await api.get('/tenant/tenantauth/me'); } catch {}
+  try {
+    me.value = await api.get('/tenant/tenantauth/me');
+  } catch {
+    me.value = null;
+  }
 
   await loadProduction();
-   await loadMembers();   
+  await loadMembers();
 
   const data = await api.get(`/tenant/runsheets/${route.params.id}`);
   rs.value = data;
 
   // hydrate supplier/takeTo/set if they came back as ids
   if (rs.value?.supplier && typeof rs.value.supplier === 'string') {
-    try { rs.value.supplier = await api.get(`/tenant/suppliers/${rs.value.supplier}`); } catch {}
+    try {
+      rs.value.supplier = await api.get(
+        `/tenant/suppliers/${rs.value.supplier}`
+      );
+    } catch {
+      /* ignore */
+    }
   }
   if (rs.value?.takeTo && typeof rs.value.takeTo === 'string') {
-    try { rs.value.takeTo = await api.get(`/tenant/places/${rs.value.takeTo}`); } catch {}
+    try {
+      rs.value.takeTo = await api.get(
+        `/tenant/places/${rs.value.takeTo}`
+      );
+    } catch {
+      /* ignore */
+    }
   }
   if (rs.value?.set && typeof rs.value.set === 'string') {
-    try { rs.value.set = await api.get(`/tenant/sets/${rs.value.set}`); } catch {}
+    try {
+      rs.value.set = await api.get(`/tenant/sets/${rs.value.set}`);
+    } catch {
+      /* ignore */
+    }
   }
 
   await hydrateContactPerson();
-  await hydrateCompletedUsers(); 
-  
+  await hydrateCompletedUsers();
 });
-watch(() => slug.value, loadProduction);
-watch(() => rs.value?.contact, hydrateContactPerson);
+
+watch(
+  () => slug.value,
+  () => {
+    loadProduction();
+  }
+);
+watch(
+  () => rs.value?.contact,
+  () => {
+    hydrateContactPerson();
+  }
+);
 
 /* ---------------- print as 1-page image ---------------- */
 async function doPrintImage() {
@@ -825,7 +979,11 @@ async function doPrintImage() {
 
   const targetPxW = Math.round(innerWIn * PRINT_DPI);
 
-  const prev = { fontSize: el.style.fontSize, width: el.style.width, maxWidth: el.style.maxWidth };
+  const prev = {
+    fontSize: el.style.fontSize,
+    width: el.style.width,
+    maxWidth: el.style.maxWidth,
+  };
   el.style.fontSize = `${Math.round(FONT_BOOST * 100)}%`;
   el.style.width = `${targetPxW}px`;
   el.style.maxWidth = `${targetPxW}px`;
@@ -836,14 +994,17 @@ async function doPrintImage() {
       scale: H2C_SCALE,
       useCORS: true,
       windowWidth: el.scrollWidth,
-      windowHeight: el.scrollHeight
+      windowHeight: el.scrollHeight,
     });
     const dataUrl = canvas.toDataURL('image/png');
 
     const ratio = canvas.height / canvas.width;
     let dispWIn = innerWIn;
     let dispHIn = dispWIn * ratio;
-    if (dispHIn > innerHIn) { dispHIn = innerHIn; dispWIn = dispHIn / ratio; }
+    if (dispHIn > innerHIn) {
+      dispHIn = innerHIn;
+      dispWIn = dispHIn / ratio;
+    }
 
     const w = window.open('', 'rs_print');
     if (!w) return;
@@ -872,7 +1033,10 @@ async function doPrintImage() {
 </html>`);
     w.document.close();
     w.focus();
-    w.onload = () => { w.print(); w.close(); };
+    w.onload = () => {
+      w.print();
+      w.close();
+    };
   } catch (e) {
     console.error(e);
     window.print();
@@ -885,110 +1049,343 @@ async function doPrintImage() {
 </script>
 
 
+<style scoped>
+/* ===== Base (black & white) ===== */
+.page { background:#fff; color:#000; }
+.sheet-wrap { max-width:820px; margin:0 auto; padding:16px; }
+.sheet {
+  border:1px solid #000;
+  padding:10px;
+  background:#fff;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size:13px;
+  line-height:1.25;
+}
 
+/* Common */
+.row {
+  border:1px solid #000;
+  border-left:none;
+  border-right:none;
+}
+.row + .row { border-top:none; }
+.panel { border:1px solid #000; background:#fff; padding:8px; }
+.label-sm { font-weight:700; margin-right:6px; }
+.mini { font-size:12px; font-weight:700; letter-spacing:.02em; }
+.line {
+  display:inline-block;
+  min-width:120px;
+  border-bottom:1px solid #000;
+  line-height:1.2;
+}
+.line--short { min-width:80px; }
+.line--wide { min-width:260px; }
+.line--grow { flex:1 1 auto; min-width:200px; }
+.box {
+  display:inline-block;
+  width:13px;
+  height:13px;
+  border:1px solid #000;
+  margin-right:6px;
+  position:relative;
+}
+.box.checked::after { /* Use a real glyph so it prints (no background fills needed) */
+  content: "✓";
+  position:absolute;
+  left: 1px;
+  top: -1px;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 900;
+  color:#000;
+}
+.box--ghost { border:1px solid #000; }
 
+/* Header */
+.header { display:flex; padding:6px 8px; }
+.h-left { flex:1 1 35%; display:flex; align-items:flex-end; }
+.h-center { flex:1 1 30%; text-align:center; }
+.h-right {
+  flex:1 1 35%;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:6px;
+}
+.title { font-weight:900; letter-spacing:.06em; }
+.subtitle { font-weight:800; font-size:12px; letter-spacing:.08em; margin-top:2px; }
+.line-pair { display:flex; align-items:flex-end; gap:6px; }
+.label { font-weight:800; }
 
+/* Dates */
+.dates { display:flex; gap:16px; padding:6px 8px; }
+.half { flex:1 1 50%; }
 
-  
-  
-  <style scoped>
-  /* ===== Base (black & white) ===== */
-  .page { background:#fff; color:#000; }
-  .sheet-wrap { max-width:820px; margin:0 auto; padding:16px; }
-  .sheet { border:1px solid #000; padding:10px; background:#fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-  
-  /* Common */
-  .row { border:1px solid #000; border-left:none; border-right:none; }
-  .row + .row { border-top:none; }
-  .panel { border:1px solid #000; background:#fff; padding:8px; }
-  .label-sm { font-weight:700; margin-right:6px; }
-  .mini { font-size:12px; font-weight:700; letter-spacing:.02em; }
-  .line { display:inline-block; min-width:120px; border-bottom:1px solid #000; line-height:1.2; }
-  .line--short { min-width:80px; }
-  .line--wide { min-width:260px; }
-  .line--grow { flex:1 1 auto; min-width:200px; }
-  .box { display:inline-block; width:13px; height:13px; border:1px solid #000; margin-right:6px; position:relative; }
-  .box.checked::after { /* Use a real glyph so it prints (no background fills needed) */
-    content: "✓";
-    position:absolute;
-    left: 1px;
-    top: -1px;
-    font-size: 13px;
-    line-height: 1;
-    font-weight: 900;
-    color:#000;
+/* Address/Supplier */
+.addr-supplier {
+  display:grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap:10px;
+  padding:10px 0;
+  border:none;
+}
+.addr .addr-line { line-height:1.4; }
+.addr .strong { font-weight:800; }
+.supplier .field {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin:5px 0;
+}
+.supplier .fill {
+  flex:1 1 auto;
+  border-bottom:1px solid #000;
+  min-height:18px;
+}
+.supplier .fill--hrs { max-width:120px; }
+.supplier .hrs { margin-left:auto; }
+
+/* ===== Items table: SINGLE COLUMN "ITEMS" ===== */
+.table { border:1px solid #000; margin:10px 0; }
+.thead {
+  display:block;
+  border-bottom:1px solid #000;
+}
+.th {
+  padding:6px;
+  font-weight:800;
+  border-right:none;
+}
+.th-item-full { width:100%; }
+
+.tbody { display:block; }
+.tbody .tr {
+  display:block;
+  border-top:1px solid #000;
+  min-height:24px;
+}
+.td {
+  padding:4px 6px;
+  border-right:none;
+}
+.td-item-full {
+  width:100%;
+  word-break:break-word;
+}
+
+/* Lower row */
+.lower {
+  display:grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap:10px;
+  padding:10px 0;
+  border:none;
+}
+.dest .checkline {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:6px 0;
+}
+.fillline {
+  flex:1 1 auto;
+  border-bottom:1px solid #000;
+  min-height:16px;
+}
+.contacts { padding:0; }
+.contact {
+  display:grid;
+  grid-template-columns:16px 1fr auto;
+  align-items:center;
+  gap:8px;
+  border-bottom:1px solid #000;
+  padding:6px 8px;
+}
+.contact:last-child { border-bottom:none; }
+.contact .name { font-weight:700; }
+.contact .phone { font-size:12px; }
+.pay { grid-column: 1 / -1; }
+.pay-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+}
+.cell {
+  border:1px solid #000;
+  padding:6px;
+  min-height:54px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.cell.wide { grid-column: span 2; }
+.inline { display:inline-flex; align-items:center; gap:6px; }
+.gap { width:14px; display:inline-block; }
+.uline { border-bottom:1px solid #000; min-height:18px; }
+
+/* Actions row */
+.actions {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  padding:10px 0;
+  border:none;
+}
+.act .cap {
+  font-weight:800;
+  border-bottom:1px solid #000;
+  padding-bottom:4px;
+  margin-bottom:6px;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px;
+}
+.act .sp { width:10px; display:inline-block; }
+.act .line-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:6px 0;
+}
+
+/* QC */
+.qc {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:6px;
+}
+.sigwrap {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  height:38px;
+}
+.sigwrap img { max-height:34px; }
+
+/* Footer actions */
+.footer-actions {
+  display:flex;
+  gap:8px;
+  align-items:center;
+  justify-content:flex-end;
+  margin-top:12px;
+}
+.btn {
+  appearance:none;
+  background:#000;
+  color:#fff;
+  border:1px solid #000;
+  padding:8px 12px;
+  cursor:pointer;
+  font-size:13px;
+}
+.btn:hover { background:#fff; color:#000; }
+.btn.btn--primary {
+  background:#000;
+  border-color:#000;
+}
+.share-msg { font-size:12px; margin-left:8px; }
+
+/* Hide toolbar/nav in print */
+.no-print { margin-bottom:12px; }
+@media print {
+  .no-print { display:none !important; }
+  .page { background:#fff; }
+  .sheet-wrap { padding:0; }
+  .sheet { border:1px solid #000; box-shadow:none; border-radius:0; }
+}
+
+/* ===== Mobile: make layout phone-friendly ===== */
+@media (max-width: 640px) {
+  .sheet-wrap {
+    padding:8px 4px 24px;
   }
-  .box--ghost { border:1px solid #000; }
-  
-  /* Header */
-  .header { display:flex; padding:6px 8px; }
-  .h-left { flex:1 1 35%; display:flex; align-items:flex-end; }
-  .h-center { flex:1 1 30%; text-align:center; }
-  .h-right { flex:1 1 35%; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
-  .title { font-weight:900; letter-spacing:.06em; }
-  .subtitle { font-weight:800; font-size:12px; letter-spacing:.08em; margin-top:2px; }
-  .line-pair { display:flex; align-items:flex-end; gap:6px; }
-  .label { font-weight:800; }
-  
-  /* Dates */
-  .dates { display:flex; gap:16px; padding:6px 8px; }
-  .half { flex:1 1 50%; }
-  
-  /* Address/Supplier */
-  .addr-supplier { display:grid; grid-template-columns: 1.2fr 1fr; gap:10px; padding:10px 0; border:none; }
-  .addr .addr-line { line-height:1.4; }
-  .addr .strong { font-weight:800; }
-  .supplier .field { display:flex; align-items:center; gap:6px; margin:5px 0; }
-  .supplier .fill { flex:1 1 auto; border-bottom:1px solid #000; min-height:18px; }
-  .supplier .fill--hrs { max-width:120px; }
-  .supplier .hrs { margin-left:auto; }
-  
-  /* Items table */
-  .table { border:1px solid #000; margin:10px 0; }
-  .thead { display:grid; grid-template-columns:220px 1fr; }
-  .th { padding:6px; font-weight:800; border-right:1px solid #000; }
-  .th:last-child { border-right:none; }
-  .tbody .tr { display:grid; grid-template-columns:220px 1fr; border-top:1px solid #000; min-height:28px; }
-  .td { padding:4px 6px; border-right:1px solid #000; }
-  .td:last-child { border-right:none; }
-  
-  /* Lower row */
-  .lower { display:grid; grid-template-columns: 1.1fr 0.9fr; gap:10px; padding:10px 0; border:none; }
-  .dest .checkline { display:flex; align-items:center; gap:8px; margin:6px 0; }
-  .fillline { flex:1 1 auto; border-bottom:1px solid #000; min-height:16px; }
-  .contacts { padding:0; }
-  .contact { display:grid; grid-template-columns:16px 1fr auto; align-items:center; gap:8px; border-bottom:1px solid #000; padding:6px 8px; }
-  .contact:last-child { border-bottom:none; }
-  .contact .name { font-weight:700; }
-  .contact .phone { font-size:12px; }
-  .pay { grid-column: 1 / -1; }
-  .pay-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
-  .cell { border:1px solid #000; padding:6px; min-height:54px; display:flex; flex-direction:column; gap:6px; }
-  .cell.wide { grid-column: span 2; }
-  .inline { display:inline-flex; align-items:center; gap:6px; }
-  .gap { width:14px; display:inline-block; }
-  .uline { border-bottom:1px solid #000; min-height:18px; }
-  
-  /* Actions row */
-  .actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:10px 0; border:none; }
-  .act .cap { font-weight:800; border-bottom:1px solid #000; padding-bottom:4px; margin-bottom:6px; display:flex; align-items:center; }
-  .act .sp { width:10px; display:inline-block; }
-  .act .line-row { display:flex; align-items:center; gap:8px; margin:6px 0; }
-  
-  /* QC */
-  .qc { display:flex; align-items:center; gap:10px; margin-top:6px; }
-  .sigwrap { display:inline-flex; align-items:center; justify-content:center; height:38px; }
-  .sigwrap img { max-height:34px; }
-  
-  /* Footer actions */
-  .footer-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:12px; }
-  .btn { appearance:none; background:#000; color:#fff; border:1px solid #000; padding:8px 12px; cursor:pointer; }
-  .btn:hover { background:#fff; color:#000; }
-  .share-msg { font-size:12px; margin-left:8px; }
-  
-  /* Print — force single page & reliable ticks */
- 
-  </style>
+  .sheet {
+    padding:8px 6px;
+    font-size:11px;
+  }
+
+  /* Stack header blocks */
+  .header {
+    flex-direction:column;
+    align-items:flex-start;
+    gap:6px;
+  }
+  .h-left,
+  .h-center,
+  .h-right {
+    flex:1 1 auto;
+    text-align:left;
+    align-items:flex-start;
+  }
+  .h-right {
+    align-items:flex-start;
+  }
+
+  /* Dates stacked */
+  .dates {
+    flex-direction:column;
+    gap:6px;
+  }
+
+  /* Address / Supplier single column */
+  .addr-supplier {
+    grid-template-columns:1fr;
+    gap:6px;
+    padding:8px 0;
+  }
+
+  /* Lower row single column */
+  .lower {
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+  .pay {
+    grid-column:auto;
+  }
+  .pay-grid {
+    grid-template-columns:1fr 1fr;
+  }
+
+  /* Actions single column */
+  .actions {
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+
+  /* Items table tweaks for small screens */
+  .table {
+    margin:8px 0;
+  }
+  .th,
+  .td {
+    padding:4px 4px;
+  }
+  .td-item-full,
+  .th-item-full {
+    word-break:break-word;
+  }
+
+  /* QC stack a bit more gracefully */
+  .qc {
+    flex-wrap:wrap;
+    align-items:flex-start;
+  }
+
+  /* Footer buttons wrap & left align */
+  .footer-actions {
+    justify-content:flex-start;
+    flex-wrap:wrap;
+  }
+  .btn {
+    padding:6px 10px;
+    font-size:11px;
+  }
+}
+</style>
+
   
   
   

@@ -9,6 +9,10 @@ import TenantLogin from './views/Login.vue';
 import Dashboard from './views/Dashboard.vue';
 import SetPassword from './views/SetPassword.vue';
 
+import PrivacyView from './views/PrivacyView.vue';
+import TermsView from './views/TermsView.vue';
+import ContactView from './views/ContactView.vue';
+
 // Lazy views
 const RunSheets              = () => import('./views/RunSheets.vue');
 const RunSheetSingle         = () => import('./views/RunsheetSingle.vue');
@@ -42,6 +46,8 @@ const Purchase               = () => import('./views/Purchase.vue');
 const OwnerLogin             = () => import('./views/OwnerLogin.vue');
 const OwnerDashboard         = () => import('./views/OwnerDashboard.vue');
 const OwnerProductionEditor  = () => import('./views/OwnerProductionEditor.vue');
+
+
 
 /* ---------------- auth helpers ---------------- */
 function getToken() {
@@ -200,6 +206,10 @@ const router = createRouter({
     { path: '/purchase', name: 'purchase', component: Purchase },
     { path: '/features', name: 'features', component: Features },
     { path: '/FAQ', name: 'FAQ', component: FAQ },
+  { path: '/privacy', component: PrivacyView },
+  { path: '/terms', component: TermsView },
+  { path: '/contact', component: ContactView },
+
 
     // Global set-password (no slug)
     { path: '/set-password', name: 'set-password', component: SetPassword },

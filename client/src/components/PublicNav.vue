@@ -107,9 +107,11 @@ const isAuthed = computed(() => !!tokenRef.value);
   top: 0;
   z-index: 40;
   backdrop-filter: blur(8px);
-  background: rgba(255,255,255,.85);
+  background: rgba(255, 255, 255, 0.9);
   border-bottom: 1px solid #eaeaea;
 }
+
+/* Inner layout */
 .nav__inner {
   display: flex;
   align-items: center;
@@ -117,31 +119,53 @@ const isAuthed = computed(() => !!tokenRef.value);
   gap: 16px;
   padding: 12px 0;
 }
-.container { max-width: 1100px; margin: 0 auto; }
-.brand { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* Brand / logo */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
 .brand__logo {
-  height: 125px;
+  height: 80px;
   width: auto;
   border-radius: 6px;
   object-fit: contain;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
+/* Links row (desktop) */
 .links {
   display: flex;
   gap: 14px;
   align-items: center;
   width: 100%;
 }
-.flex-spacer { flex: 1; }
 
+.flex-spacer {
+  flex: 1;
+}
+
+/* Link typography */
 .links a {
   color: #222;
   text-decoration: none;
   font-weight: 500;
+  font-size: 15px;
 }
-.links a.router-link-active { color: #0a66c2; }
+
+.links a.router-link-active {
+  color: #0a66c2;
+}
 
 /* Buttons */
 .btn {
@@ -150,23 +174,109 @@ const isAuthed = computed(() => !!tokenRef.value);
   justify-content: center;
   gap: 8px;
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: 999px;
   border: 1px solid #0a66c2;
   background: #0a66c2;
   color: #fff;
   font-weight: 600;
-  transition: .15s ease;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: 0.15s ease;
+  white-space: nowrap;
 }
-.btn:hover { filter: brightness(1.05); transform: translateY(-1px); }
+
+.btn:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .btn--ghost {
   background: transparent;
   color: #0a66c2;
-  border-color: #0a66c2;
 }
 
-@media (max-width: 768px) {
-  .links { gap: 10px; }
-  .btn { padding: 8px 12px; }
+/* ================== Tablet tweaks ================== */
+@media (max-width: 900px) {
+  .brand__logo {
+    height: 64px;
+  }
+
+  .links {
+    gap: 10px;
+  }
+
+  .btn {
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+}
+
+/* ================== Phone layout ================== */
+@media (max-width: 640px) {
+  .nav {
+    padding: 6px 0;
+  }
+
+  .nav__inner {
+    padding: 8px 12px;
+    gap: 10px;
+    flex-wrap: wrap;        /* allow brand + links to wrap */
+  }
+
+  .brand__logo {
+    height: 44px;
+    border-radius: 4px;
+  }
+
+  /* Stack links under the logo, wrap nicely */
+  .links {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    row-gap: 6px;
+    column-gap: 10px;
+  }
+
+  /* Spacer is pointless on small screens */
+  .flex-spacer {
+    display: none;
+  }
+
+  .links a {
+    font-size: 14px;
+  }
+
+  /* Make auth buttons more tappable on mobile */
+  .links .btn,
+  .links .btn--ghost {
+    padding: 7px 14px;
+  }
+}
+
+/* Extra-small phones: make buttons full-width row chips */
+@media (max-width: 430px) {
+  .links {
+    row-gap: 8px;
+  }
+
+  .links > a,
+  .links > .btn,
+  .links > .btn--ghost {
+    font-size: 14px;
+  }
+
+  /* Make auth buttons stand out as full-width actions */
+  .links .btn,
+  .links .btn--ghost {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
 }
 </style>
 
